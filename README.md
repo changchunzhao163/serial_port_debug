@@ -1,7 +1,5 @@
 ### pyqt4 + python2.7.18 串行数据调试器
 
-![image](https://github.com/changchunzhao163/serial_port_debug/blob/master/screenshots/serial_port_debug01.png)
-
 #### 可实现功能
 
     串口连接
