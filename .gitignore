@@ -1,0 +1,6 @@
+*.pyc
+*.txt
+log_*
+.idea/
+resource/Thumbs.db
+resource/connection.png
