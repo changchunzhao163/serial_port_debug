@@ -687,7 +687,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         mix_command = data.split(':')[0].upper()
         if 'S' == mix_command:
             ##time.sleep(float(data[2:]))
-            self.send_queue_cache.appendleft(('SLEEP', float(data[2:])))
+            self.dataChannel.send_queue_cache.appendleft(('SLEEP', float(data[2:])))
             return ''
         elif 'M' == mix_command:
             data = data[2:]
