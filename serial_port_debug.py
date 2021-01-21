@@ -2,19 +2,6 @@
 
 from PyQt4 import QtCore, QtGui
 import sys
-import Queue
-import threading
-import serial
-import collections
-import time
-import copy
-import zlib
-import ctypes
-import re
-import os
-import datetime
-import sip
-import socket
 
 import main_window
 

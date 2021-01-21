@@ -9,6 +9,7 @@ import binascii
 import Queue
 import collections
 import serial
+import select
 
 def crc16_c(Tar, res=0xFFFF):
     # 查表法计算crc16值，利用给定的表格，计算目标字符串的crc值
@@ -161,26 +162,376 @@ class msgSignal(QtCore.QObject):
         super(msgSignal, self).__init__(parent)
 
 
+class DataChannel(object):
+    def __init__(self, parent_dataBrowser=None):
+        self.parent = parent_dataBrowser
+        self.socekt = None
+        self.status = 'Idle'
+        self.mode = parent_dataBrowser.mode
+        self.ip_str = parent_dataBrowser.ip_str
+        self.port_str = parent_dataBrowser.port_str
+        self.signal_msg = parent_dataBrowser.signal_msg
+        self.paser_mix_data = parent_dataBrowser.paser_mix_data
+        self.send_queue_cache = collections.deque()
+        self.send_thread_queue = Queue.Queue(200)
+        self.send_thread_running = False
+
+    def start_link(self):
+        if not self.send_thread_running:
+            self.send_thread_running = True
+            threading.Thread(target=self.send_thread, name='send_thread').start()
+        self.signal_msg.emit('statusChange', self.parent)
+
+    def stop_link(self):
+        ##print 'stop_link'
+        if self.send_thread_running:
+            self.send_thread_queue.put(('EXIT', ''))
+            self.send_thread_running = False
+        self.signal_msg.emit('newLineText', (self.parent, 'disconnect.'))
+        ##self.signal_msg.emit('statusChange', self)
+
+    def send_data(self, data_type, data):
+        if self.socekt is None: return
+        if self.mode == 'tcp listen' or self.mode == 'udp listen':
+            if self.status != 'Listen': return
+        elif self.status != 'Connect': return
+        self.send_thread_queue.put((data_type, data))
+
+    def send_thread(self):
+        sleep_timestamp = 0
+        sleep_timeout = None
+        self.send_queue_cache.clear()
+        while True:
+            try:
+                req, req_data = self.send_thread_queue.get(True, sleep_timeout)
+                if req == 'EXIT':
+                    print 'send_thread EXIT'
+                    while not self.send_thread_queue.empty():
+                        self.send_thread_queue.get(False)
+                    return
+                if self.socekt is None: continue
+                if self.mode == 'tcp listen' or self.mode == 'udp listen':
+                    if self.status != 'Listen': continue
+                elif self.status != 'Connect': continue
+                self.send_queue_cache.append((req, req_data))
+            except:
+                pass
+
+            if sleep_timeout:
+                current_time = time.time()
+                delta_time = current_time - sleep_timestamp
+                if delta_time < sleep_timeout:
+                    sleep_timeout = sleep_timeout - delta_time
+                    sleep_timestamp = current_time
+                    continue
+                else:
+                    sleep_timeout = None
+
+            while len(self.send_queue_cache) > 0:
+                req, req_data = self.send_queue_cache.popleft()
+                if req == 'SLEEP':
+                    print 'SLEEP', req_data
+                    sleep_timestamp = time.time()
+                    sleep_timeout = req_data
+                    break
+                elif req == 'sendPlainData':
+                    pass
+                else:
+                    req_data = self.paser_mix_data(req_data)
+                if req_data:
+                    if self.mode == 'tcp listen':
+                        if len(self.parent.dataChannel.clients) == 0: continue
+                        for s in self.parent.dataChannel.clients:
+                            try: s.send(req_data)
+                            except: pass
+                    else:
+                        try: self.socekt.write(req_data)
+                        except: pass
+                    if 'E' in self.parent.display_mode:
+                        self.signal_msg.emit('appendEchoText', (self.parent, req_data))
+                    self.parent.send_counts += len(req_data)
+                    self.signal_msg.emit('statusChange', self.parent)
+
+
+class clientPortDataChannel(DataChannel):
+    def __init__(self, parent_dataBrowser=None):
+        super(clientPortDataChannel, self).__init__(parent_dataBrowser)
+
+    def start_link(self):
+        if self.socekt is not None: return
+        if self.status != 'Idle': return
+        self.status = 'Connecting'
+        threading.Thread(target=self.recv_thread, name='recv_thread').start()
+        super(clientPortDataChannel, self).start_link()
+
+    def stop_link(self):
+        print 'clientPortDataChannel stop_link'
+        super(clientPortDataChannel, self).stop_link()
+        if self.socekt is None: return
+        try: self.socekt.close()
+        except: pass
+        self.socekt = None
+
+    def recv_thread(self):
+        try:
+            if self.mode == 'tcp client':
+                self.socekt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socekt.setblocking(False)
+            elif self.mode == 'udp client':
+                self.socekt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.socekt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            elif self.mode == 'com':
+                print self.ip_str, self.port_str
+                ip_str_split = self.ip_str.split(':')
+                port_set = ip_str_split[0]
+                UART_set = self.port_str
+                baudrate_set = 115200
+                if len(ip_str_split) > 1:
+                    try: baudrate_set = int(ip_str_split[1])
+                    except: pass
+                bytesize_set = uart_bytesize_set.get(UART_set[0], serial.EIGHTBITS)
+                stopbits_set = uart_stopbits_set.get(UART_set[1], serial.STOPBITS_ONE)
+                parity_set = uart_parity_set.get(UART_set[2], serial.PARITY_NONE)
+                self.socekt = serial.Serial(
+                    port=port_set,
+                    baudrate=baudrate_set,
+                    bytesize=bytesize_set,
+                    parity=parity_set,
+                    stopbits=stopbits_set,
+                    timeout=0.001,
+                    writeTimeout=0.1)
+                print 'connect ok'
+                self.status = 'Connect'
+                self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
+                ##self.signal_msg.emit('statusChange', self.parent)
+        except:
+            self.socekt = None
+            self.status = 'Idle'
+            if self.mode == 'com': error_str = 'open com error.'
+            else: error_str = 'creat socket error.'
+            self.signal_msg.emit('newLineText', (self.parent, error_str))
+            ##self.signal_msg.emit('statusChange', self.parent)
+            print 'creat socket error'
+            return
+
+        if self.mode == 'tcp client' or self.mode == 'udp client':
+            while self.socekt is not None:
+                ret = client_connect(self.socekt, (self.ip_str, int(self.port_str)))
+                if ret == 1:
+                    print 'connect ok'
+                    self.status = 'Connect'
+                    self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
+                    ##self.signal_msg.emit('statusChange', self.parent)
+                    break
+                elif ret == -1:
+                    print 'connect error'
+                    self.signal_msg.emit('newLineText', (self.parent, 'connect failure.'))
+                    ##self.signal_msg.emit('statusChange', self.parent)
+                    try:
+                        if self.mode != 'com':
+                            self.socekt.shutdown(socket.SHUT_RDWR)
+                            self.socekt.close()
+                    except:
+                        pass
+                    self.socekt = None
+                    self.status = 'Idle'
+                    return
+                elif ret == 0:
+                    time.sleep(0.01)
+            if self.socekt is not None:
+                self.socekt = SocketSerial(self.socekt)
+
+        while self.socekt is not None:
+            try:
+                data = self.socekt.read(1024)
+                if not data: continue
+            except:
+                if self.socekt is not None:
+                    print 'peer disconnect'
+                    self.signal_msg.emit('newLineText', (self.parent, 'peer disconnect.'))
+                    ##self.signal_msg.emit('statusChange', self.parent)
+                break
+            self.signal_msg.emit('appendText', (self.parent, data))
+            ##self.recv_counts += len(data)
+            ##self.signal_msg.emit('statusChange', self)
+
+        if self.socekt is not None:
+            self.socekt.close()
+        self.socekt = None
+        self.status = 'Idle'
+        self.signal_msg.emit('statusChange', self.parent)
+        ##print 'recv_thread exit'
+
+
+class tcpAcceptedDataChannel(DataChannel):
+    def __init__(self, parent_dataBrowser=None,
+                 remote_socket=None, remote_address=None, listen_dataBrowser=None):
+        super(tcpAcceptedDataChannel, self).__init__(parent_dataBrowser)
+        self.remote_socket = remote_socket
+        self.remote_address = remote_address
+        self.listen_dataBrowser = listen_dataBrowser
+        self.socekt = SocketSerial(remote_socket)
+
+    def start_link(self):
+        if self.socekt is None: return
+        if self.status != 'Idle': return
+        threading.Thread(target=self.recv_thread, name='recv_thread').start()
+        temp_str = 'accept client: %s:%s' % (self.remote_address[0], self.remote_address[1])
+        self.signal_msg.emit('newLineText', (self.parent, temp_str))
+        self.status = 'Connect'
+        super(tcpAcceptedDataChannel, self).start_link()
+
+    def stop_link(self):
+        print 'tcpAcceptedDataChannel stop_link'
+        super(tcpAcceptedDataChannel, self).stop_link()
+        if self.socekt is None: return
+        if self.status == 'Closed': return
+        self.status = 'Closed'
+        self.socekt.close()
+        self.socekt = None
+        temp_str = 'client closed: %s:%s' % (self.remote_address[0], self.remote_address[1])
+        self.signal_msg.emit('newLineText', (self.listen_dataBrowser, temp_str))
+        ##self.signal_msg.emit('statusChange', self.parent)
+
+    def recv_thread(self):
+        while self.socekt is not None:
+            try:
+                data = self.socekt.read(1024)
+                if not data: continue
+            except:
+                if self.socekt is not None:
+                    print 'peer disconnect'
+                    self.signal_msg.emit('newLineText', (self.parent, 'client closed'))
+                    temp_str = 'client closed: %s:%s' % (self.remote_address[0], self.remote_address[1])
+                    self.signal_msg.emit('newLineText', (self.listen_dataBrowser, temp_str))
+                break
+            self.signal_msg.emit('appendText', (self.parent, data))
+            ##self.recv_counts += len(data)
+            ##self.signal_msg.emit('statusChange', self)
+
+        if self.socekt is not None:
+            self.socekt.close()
+        self.socekt = None
+        self.status = 'Closed'
+        self.signal_msg.emit('statusChange', self.parent)
+
+
+class tcpListenDataChannel(DataChannel):
+    def __init__(self, parent_dataBrowser=None):
+        super(tcpListenDataChannel, self).__init__(parent_dataBrowser)
+        self.clients = dict()
+
+    def start_link(self):
+        if self.socekt is not None: return
+        if self.status != 'Idle': return
+        threading.Thread(target=self.tcp_listen_thread, name='tcp_listen_thread').start()
+        super(tcpListenDataChannel, self).start_link()
+
+    def stop_link(self):
+        print 'tcpListenDataChannel stop_link'
+        super(tcpListenDataChannel, self).stop_link()
+        if self.status == 'Idle': return
+        if self.socekt is None: return
+        try: self.socekt.close()
+        except: pass
+        for s in self.clients.keys():
+            try: s.close()
+            except: pass
+        self.socekt = None
+        self.status = 'Idle'
+
+    def tcp_listen_thread(self):
+        try:
+            self.socekt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socekt.bind((self.ip_str, int(self.port_str)))
+            self.socekt.listen(5)
+            ##self.socekt.setblocking(False)
+        except:
+            if self.socekt is not None:
+                self.socekt.close()
+            self.socekt = None
+            self.status = 'Idle'
+            self.signal_msg.emit('newLineText', (self.parent, 'creat socket error.'))
+            ##self.signal_msg.emit('statusChange', self.parent)
+            print 'creat socket error'
+            return
+
+        self.status = 'Listen'
+        ##self.signal_msg.emit('statusChange', self.parent)
+        self.signal_msg.emit('newLineText', (self.parent, 'Listen start'))
+        self.clients = dict()
+
+        while self.socekt is not None:
+            read_select_sockets = [self.socekt]
+            read_select_sockets += self.clients.keys()
+
+            try:
+                readable, writable, exceptional = select.select(read_select_sockets, [], [], 0.01)
+            except:
+                readable = []
+                writable = []
+                exceptional = []
+                if writable: pass
+                if exceptional: pass
+
+            for s in readable:
+                if s is self.socekt:
+                    try:
+                        client_sock, client_address = s.accept()
+                        print 'accept client', client_address
+                        temp_str = 'client accepted: %s:%s' % (client_address[0], client_address[1])
+                        self.signal_msg.emit('newLineText', (self.parent, temp_str))
+                        if self.parent.singleTab:
+                            self.clients[client_sock] = client_address
+                        else:
+                            linkStr = 'AT:%s:%d:%s' % (client_address[0], client_address[1], self.parent.display_mode)
+                            self.signal_msg.emit('acceptedDataBrowserTab',
+                                                 (linkStr, client_sock, client_address, self.parent))
+                    except Exception as e:
+                        print 'accept Exception', e
+                elif s in self.clients:
+                    try:
+                        data = s.recv(1024)
+                        if data:
+                            addr_str = '%s:%s' % (self.clients[s][0], self.clients[s][1])
+                            self.signal_msg.emit('appendIPText', (self.parent, (addr_str, data)))
+                    except Exception as e:
+                        print 'read Exception', e
+                        data = None
+                    if not data:
+                        temp_str = 'client closed: %s:%s' % (self.clients[s][0], self.clients[s][1])
+                        self.signal_msg.emit('newLineText', (self.parent, temp_str))
+                        del self.clients[s]
+                        try: s.close()
+                        except: pass
+
+
 class dataBrowser(QtGui.QPlainTextEdit):
-    def __init__(self, parent=None, MainWindow=None, main_module=None, linkStr=None):
+    def __init__(self, parent=None, MainWindow=None, main_module=None, linkStr=None,
+                 remote_socket=None, remote_address=None, listen_DataBrowser=None):
         super(dataBrowser, self).__init__(parent)
         self.parent = parent
         self.MainWindow = MainWindow
         self.main_module = main_module
         self.linkStr = linkStr
-        self.socekt = None
-        self.status = 'Idle'
         self.last_new_line = 2
         self.log_handler = None
         self.recv_counts = 0
         self.send_counts = 0
-        self.send_queue_cache = collections.deque()
-        self.send_thread_queue = Queue.Queue(200)
-        self.send_thread_running = False
-        self.mode, self.ip_str, self.port_str, self.display_mode = self.paser_linkStr(linkStr)
-        print self.mode, self.ip_str, self.port_str, self.display_mode
         self.signal_msg = self.MainWindow.MainWindow_message.signal_msg
+        self.dataChannel = None
         self.setReadOnly(True)
+
+        self.mode, self.ip_str, self.port_str, self.display_mode, self.singleTab = self.paser_linkStr(linkStr)
+        print self.mode, self.ip_str, self.port_str, self.display_mode
+        self.head_str = self.genarate_head_str()
+
+        if self.mode == 'tcp client' or self.mode == 'udp client' or self.mode == 'com':
+            self.dataChannel = clientPortDataChannel(self)
+        elif self.mode == 'tcp accept client':
+            self.dataChannel = tcpAcceptedDataChannel(self, remote_socket, remote_address, listen_DataBrowser)
+        elif self.mode == 'tcp listen':
+            self.dataChannel = tcpListenDataChannel(self)
         if 'L' in self.display_mode: self.start_log()
 
     def paser_linkStr(self, linkStr):
@@ -191,8 +542,10 @@ class dataBrowser(QtGui.QPlainTextEdit):
         # 'HCTEL'
         linkStr_split = linkStr.split(':')
         mode = 'tcp client'
-        display_mode = 'C'  # 'HCTEL'
+        ##display_mode = 'C'  # 'HCTEL'
+        display_mode = self.MainWindow.get_toolbar_display_mode()
         port_str = '65500'
+        singleTab = False
         if linkStr_split[0].upper() in mode_str_to_mode:
             mode = mode_str_to_mode[linkStr_split[0].upper()]
             del linkStr_split[0]
@@ -207,17 +560,43 @@ class dataBrowser(QtGui.QPlainTextEdit):
             if len(linkStr_split[1]) > 0: port_str = linkStr_split[1]
         if len(linkStr_split) > 2:
             if len(linkStr_split[2]) > 0: display_mode = linkStr_split[2]
+        if len(linkStr_split) > 3:
+            if mode == 'tcp listen' or mode == 'udp listen':
+                if linkStr_split[3].upper() == 'S':
+                    singleTab = True
+        display_mode = display_mode.upper()
+        if mode == 'tcp listen' or mode == 'udp listen':
+            if display_mode == 'S':
+                singleTab = True
+                display_mode = self.MainWindow.get_toolbar_display_mode()
+            if singleTab:
+                if 'T' not in display_mode:
+                    display_mode += 'T'
+                if 'E' not in display_mode:
+                    display_mode += 'E'
 
-        return mode, ip_str, port_str, display_mode
+        return mode, ip_str, port_str, display_mode, singleTab
 
     def compare_linkStr(self, linkStr):
-        mode, ip_str, port_str, display_mode = self.paser_linkStr(linkStr)
+        mode, ip_str, port_str, display_mode, singleTab = self.paser_linkStr(linkStr)
         if mode != self.mode: return False
         if ip_str != self.ip_str: return False
         if port_str != self.port_str: return False
         return True
 
-    def genarat_display_str(self, disp_type, data):
+    def genarate_head_str(self):
+        head_str = ''
+        for k, v in mode_str_to_mode.items():
+            if v == self.mode:
+                head_str = k
+                break
+        head_str += ':' + self.ip_str
+        if self.mode == 'com' and self.port_str.count(':') == 0:
+            head_str += ':115200'
+        head_str += ':' + self.port_str
+        return head_str
+
+    def genarat_display_str(self, disp_type, data, ip_address):
         disp_str = ''
         if self.last_new_line == 0 and disp_type == 'appendEchoText':
             disp_str += '\n'
@@ -226,10 +605,11 @@ class dataBrowser(QtGui.QPlainTextEdit):
             time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             disp_str += '\n' * (2 - self.last_new_line)
             if disp_type == 'appendText':
-                ##disp_str += '--- RECV ' + time_str + ' ---\n'
-                disp_str += '[%s] RECV: %d bytes\n' % (time_str, len(data))
+                if ip_address:
+                    disp_str += '[%s][%s] RECV: %d bytes\n' % (time_str, ip_address, len(data))
+                else:
+                    disp_str += '[%s] RECV: %d bytes\n' % (time_str, len(data))
             else:
-                ##disp_str += '--- SEND ' + time_str + ' ---\n'
                 disp_str += '[%s] SEND: %d bytes\n' % (time_str, len(data))
         if 'H' in self.display_mode and 'C' in self.display_mode:
             bytes_data = bytes(data)
@@ -256,12 +636,17 @@ class dataBrowser(QtGui.QPlainTextEdit):
 
         return disp_str
 
-    @QtCore.pyqtSlot()
     def display_msg_handler(self, msq_type, msq_data):
         self.moveCursor(QtGui.QTextCursor.End)
         disp_str = ''
+        if msq_type == 'appendIPText':
+            ip_address, data = msq_data
+            msq_type = 'appendText'
+        else:
+            ip_address = ''
+            data = msq_data
         if msq_type == 'appendText' or msq_type == 'appendEchoText':
-            disp_str = self.genarat_display_str(msq_type, msq_data)
+            disp_str = self.genarat_display_str(msq_type, data, ip_address)
             if '\n' == disp_str[-1:]:
                 self.last_new_line = 1
             else:
@@ -271,44 +656,32 @@ class dataBrowser(QtGui.QPlainTextEdit):
                 else:
                     self.last_new_line = 0
         else:
-            if msq_data:
+            if data:
                 time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 time_str = '--- ' + time_str + ' ---'
                 disp_str += '\n' * (2 - self.last_new_line)
-                disp_str += time_str + '\n' + msq_data + '\n'
+                disp_str += time_str + '\n' + data + '\n'
             disp_str += '\n'
             self.last_new_line = 2
         self.insertPlainText(disp_str)
         self.moveCursor(QtGui.QTextCursor.End)
+        if msq_type == 'appendText':
+            self.recv_counts += len(data)
         if self.log_handler:
             try:
                 self.log_handler.write(disp_str)
                 self.log_handler.flush()
             except:
                 self.log_handler = None
+        self.signal_msg.emit('statusChange', self)
 
     def start_link(self):
-        if self.socekt is not None: return
-        if self.status != 'Idle': return
-        ##self.recvThread.start()
-        self.status = 'Connecting'
-        self.signal_msg.emit('statusChange', self)
-        threading.Thread(target=self.recv_thread, name='recv_thread').start()
-        if not self.send_thread_running:
-            self.send_thread_running = True
-            threading.Thread(target=self.send_thread, name='send_thread').start()
+        if self.dataChannel is None: return
+        self.dataChannel.start_link()
 
     def stop_link(self):
-        print 'stop_link'
-        if self.send_thread_running:
-            self.send_thread_queue.put(('EXIT', ''))
-            self.send_thread_running = False
-        if self.socekt is None: return
-        try: self.socekt.close()
-        except: pass
-        self.socekt = None
-        self.signal_msg.emit('newLineText', (self, 'disconnect.'))
-        self.signal_msg.emit('statusChange', self)
+        if self.dataChannel is None: return
+        self.dataChannel.stop_link()
 
     def paser_mix_data(self, data):
         mix_command = data.split(':')[0].upper()
@@ -349,19 +722,12 @@ class dataBrowser(QtGui.QPlainTextEdit):
         return return_data
 
     def send_data(self, data_type, data):
-        if self.socekt is None: return
-        if self.status != 'Connect': return
-        ##if data_type == 'sendPlainData':
-        ##    self.socekt.write(data)
-        ##else:
-        ##    data = self.paser_mix_data(data)
-        ##    if data: self.socekt.write(data)
-        ##if data:
-        ##    if 'E' in self.display_mode:
-        ##        self.signal_msg.emit('appendEchoText', (self, data))
-        ##    self.send_counts += len(data)
-        ##    self.signal_msg.emit('statusChange', self)
-        self.send_thread_queue.put((data_type, data))
+        if self.dataChannel is None: return
+        self.dataChannel.send_data(data_type, data)
+
+    def get_status(self):
+        if self.dataChannel is None: return ''
+        return self.dataChannel.status
 
     def display_clear(self):
         self.setPlainText('')
@@ -398,143 +764,11 @@ class dataBrowser(QtGui.QPlainTextEdit):
             self.log_handler = None
         if 'L' in display_mode and not self.log_handler:
             self.start_log()
+        if self.mode == 'tcp listen' or self.mode == 'udp listen':
+            if self.singleTab:
+                if 'T' not in display_mode:
+                    display_mode += 'T'
+                if 'E' not in display_mode:
+                    display_mode += 'E'
         self.display_mode = display_mode
         self.signal_msg.emit('statusChange', self)
-
-    def send_thread(self):
-        sleep_timestamp = 0
-        sleep_timeout = None
-        self.send_queue_cache.clear()
-        while True:
-            try:
-                req, req_data = self.send_thread_queue.get(True, sleep_timeout)
-                if req == 'EXIT':
-                    print 'send_thread EXIT'
-                    while not self.send_thread_queue.empty():
-                        self.send_thread_queue.get(False)
-                    return
-                if self.socekt is None: continue
-                if self.status != 'Connect': continue
-                self.send_queue_cache.append((req, req_data))
-            except:
-                pass
-
-            if sleep_timeout:
-                current_time = time.time()
-                delta_time = current_time - sleep_timestamp
-                if delta_time < sleep_timeout:
-                    sleep_timeout = sleep_timeout - delta_time
-                    sleep_timestamp = current_time
-                    continue
-                else:
-                    sleep_timeout = None
-
-            while len(self.send_queue_cache) > 0:
-                req, req_data = self.send_queue_cache.popleft()
-                if req == 'SLEEP':
-                    print 'SLEEP', req_data
-                    sleep_timestamp = time.time()
-                    sleep_timeout = req_data
-                    break
-                elif req == 'sendPlainData':
-                    try: self.socekt.write(req_data)
-                    except: pass
-                else:
-                    req_data = self.paser_mix_data(req_data)
-                    if req_data:
-                        try: self.socekt.write(req_data)
-                        except: pass
-                if req_data:
-                    if 'E' in self.display_mode:
-                        self.signal_msg.emit('appendEchoText', (self, req_data))
-                    self.send_counts += len(req_data)
-                    self.signal_msg.emit('statusChange', self)
-
-    def recv_thread(self):
-        if self.socekt is None:
-            try:
-                if self.mode == 'tcp client':
-                    self.socekt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.socekt.setblocking(False)
-                elif self.mode == 'udp client':
-                    self.socekt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    self.socekt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                elif self.mode == 'com':
-                    print self.ip_str, self.port_str
-                    ip_str_split = self.ip_str.split(':')
-                    port_set = ip_str_split[0]
-                    UART_set = self.port_str
-                    baudrate_set = 115200
-                    if len(ip_str_split) > 1:
-                        try: baudrate_set = int(ip_str_split[1])
-                        except: pass
-                    bytesize_set = uart_bytesize_set.get(UART_set[0], serial.EIGHTBITS)
-                    stopbits_set = uart_stopbits_set.get(UART_set[1], serial.STOPBITS_ONE)
-                    parity_set = uart_parity_set.get(UART_set[2], serial.PARITY_NONE)
-                    self.socekt = serial.Serial(
-                        port=port_set,
-                        baudrate=baudrate_set,
-                        bytesize=bytesize_set,
-                        parity=parity_set,
-                        stopbits=stopbits_set,
-                        timeout=0.001,
-                        writeTimeout=0.1)
-                    print 'connect ok'
-                    self.status = 'Connect'
-                    self.signal_msg.emit('newLineText', (self, 'connect success.'))
-                    self.signal_msg.emit('statusChange', self)
-            except:
-                self.socekt = None
-                self.status = 'Idle'
-                self.signal_msg.emit('newLineText', (self, 'creat socket error.'))
-                self.signal_msg.emit('statusChange', self)
-                print 'creat socket error'
-                return
-
-        if self.mode == 'tcp client' or self.mode == 'udp client':
-            while self.socekt is not None:
-                ret = client_connect(self.socekt, (self.ip_str, int(self.port_str)))
-                if ret == 1:
-                    print 'connect ok'
-                    self.status = 'Connect'
-                    self.signal_msg.emit('newLineText', (self, 'connect success.'))
-                    self.signal_msg.emit('statusChange', self)
-                    break
-                elif ret == -1:
-                    print 'connect error'
-                    self.signal_msg.emit('newLineText', (self, 'connect failure.'))
-                    self.signal_msg.emit('statusChange', self)
-                    try:
-                        if self.mode != 'com':
-                            self.socekt.shutdown(socket.SHUT_RDWR)
-                            self.socekt.close()
-                    except:
-                        pass
-                    self.socekt = None
-                    self.status = 'Idle'
-                    return
-                elif ret == 0:
-                    time.sleep(0.01)
-            if self.socekt is not None:
-                self.socekt = SocketSerial(self.socekt)
-
-        while self.socekt is not None:
-            try:
-                data = self.socekt.read(1024)
-                if not data: continue
-            except:
-                if self.socekt is not None:
-                    print 'peer disconnect'
-                    self.signal_msg.emit('newLineText', (self, 'peer disconnect.'))
-                    self.signal_msg.emit('statusChange', self)
-                break
-            self.signal_msg.emit('appendText', (self, data))
-            self.recv_counts += len(data)
-            self.signal_msg.emit('statusChange', self)
-
-        if self.socekt is not None:
-            self.socekt.close()
-        self.socekt = None
-        self.status = 'Idle'
-        self.signal_msg.emit('statusChange', self)
-        ##print 'recv_thread exit'

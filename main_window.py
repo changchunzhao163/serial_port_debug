@@ -190,18 +190,21 @@ class Ui_MainWindow(object):
         self.commandBrowser_edit_mode.triggered.connect(self.edit_mode_triggered)
 
         self.message_handler_switch = {
-            'appendText':           self.display_message_handler,
-            'appendEchoText':       self.display_message_handler,
-            'newLineText':          self.display_message_handler,
-            'closeEvent':           self.closeEvent_message_handler,
-            'sendPlainData':        self.sendData_message_handler,
-            'sendMixData':          self.sendData_message_handler,
-            'displayClear':         self.displayClear_message_handler,
-            'counterReset':         self.counterReset_message_handler,
-            'statusChange':         self.status_message_handler,
-            'statusBarFlashText':   self.statusBarFlashText_message_handler,
-            'newCommandTab':        self.newCommandTab_message_handler,
-            'newDataBrowserTab':    self.newDataBrowserTab_message_handler,
+            'appendText':             self.display_message_handler,
+            'appendIPText':           self.display_message_handler,
+            'appendEchoText':         self.display_message_handler,
+            'newLineText':            self.display_message_handler,
+            'closeEvent':             self.closeEvent_message_handler,
+            'sendPlainData':          self.sendData_message_handler,
+            'sendMixData':            self.sendData_message_handler,
+            'displayClear':           self.displayClear_message_handler,
+            'counterReset':           self.counterReset_message_handler,
+            'statusChange':           self.status_message_handler,
+            'statusBarFlashText':     self.statusBarFlashText_message_handler,
+            'newCommandTab':          self.newCommandTab_message_handler,
+            'newDataBrowserTab':      self.newDataBrowserTab_message_handler,
+            'remoteDataBrowserTab':   self.remoteDataBrowserTab_message_handler,
+            'acceptedDataBrowserTab': self.acceptedDataBrowserTab_message_handler,
         }
 
         ##link_strs = ['192.168.0.11:7788', 'u:192.168.0.11:7788']
@@ -241,9 +244,12 @@ class Ui_MainWindow(object):
 
     def status_message_handler(self, msg_type, msg_data):
         if msg_type: pass
-        tabWidget = self.dataBrowserTab.currentWidget()
-        if tabWidget is msg_data:
+        tabWidget = msg_data
+        if tabWidget is self.dataBrowserTab.currentWidget():
             self.reflash_status_indecate()
+        else:
+            i = self.dataBrowserTab.indexOf(tabWidget)
+            self.dataBrowserTab.setTabText(i, '*' + tabWidget.head_str)
 
     def statusBarFlashText_message_handler(self, msg_type, msg_data):
         if msg_type: pass
@@ -269,12 +275,27 @@ class Ui_MainWindow(object):
                 self.reflash_status_indecate()
                 return
         data_Browser = dataBrowser.dataBrowser(self.dataBrowserTab, self, self.main_module, msg_data)
-        display_mode = self.get_toolbar_display_mode()
-        if data_Browser.display_mode == 'C' and display_mode != 'C':
-            data_Browser.set_display_mode(display_mode)
-        self.dataBrowserTab.addTab(data_Browser, msg_data)
+        ##display_mode = self.get_toolbar_display_mode()
+        ##if data_Browser.display_mode == 'C' and display_mode != 'C':
+        ##    data_Browser.set_display_mode(display_mode)
+        self.dataBrowserTab.addTab(data_Browser, data_Browser.head_str)
         self.dataBrowserTab.setCurrentWidget(data_Browser)
         ##self.reflash_status_indecate()
+        data_Browser.start_link()
+
+    def remoteDataBrowserTab_message_handler(self, msg_type, msg_data):
+        if msg_type: pass
+        data_Browser = msg_data
+        self.dataBrowserTab.addTab(data_Browser, data_Browser.head_str)
+
+    def acceptedDataBrowserTab_message_handler(self, msg_type, msg_data):
+        if msg_type: pass
+        linkStr, remote_socket, remote_address, listen_DataBrowser = msg_data
+        data_Browser = dataBrowser.dataBrowser(self.dataBrowserTab, self, self.main_module, linkStr,
+                                               remote_socket,
+                                               remote_address,
+                                               listen_DataBrowser)
+        self.dataBrowserTab.addTab(data_Browser, data_Browser.head_str)
         data_Browser.start_link()
 
     def get_toolbar_display_mode(self):
@@ -308,7 +329,7 @@ class Ui_MainWindow(object):
         if self.get_toolbar_display_mode() != tabWidget.display_mode:
             self.set_toolbar_display_mode(tabWidget.display_mode)
 
-        self.statusBar_connect_status.setText(tabWidget.status)
+        self.statusBar_connect_status.setText(tabWidget.get_status())
         counts_str = u'接收: %-8d 发送: %-8d' % (tabWidget.recv_counts, tabWidget.send_counts)
         self.statusBar_rs_count.setText(counts_str)
 
@@ -322,6 +343,9 @@ class Ui_MainWindow(object):
     @QtCore.pyqtSlot()
     def dataBrowserTab_currentChanged(self, index):
         print 'dataBrowserTab_currentChanged', index
+        if index >= 0:
+            tabWidget = self.dataBrowserTab.widget(index)
+            self.dataBrowserTab.setTabText(index, tabWidget.head_str)
         self.reflash_status_indecate()
 
     @QtCore.pyqtSlot()
