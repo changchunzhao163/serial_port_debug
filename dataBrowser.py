@@ -175,6 +175,7 @@ class DataChannel(object):
         self.send_queue_cache = collections.deque()
         self.send_thread_queue = Queue.Queue(200)
         self.send_thread_running = False
+        self.send_thread_delay_queue = Queue.Queue(1)
 
     def start_link(self):
         if not self.send_thread_running:
@@ -190,12 +191,23 @@ class DataChannel(object):
         self.signal_msg.emit('newLineText', (self.parent, 'disconnect.'))
         ##self.signal_msg.emit('statusChange', self)
 
+    def close(self):
+        pass
+
+    def local_msg_handler(self, msg):
+        pass
+
     def send_data(self, data_type, data):
         if self.socekt is None: return
         if self.mode == 'tcp listen' or self.mode == 'udp listen':
             if self.status != 'Listen': return
         elif self.status != 'Connect': return
         self.send_thread_queue.put((data_type, data))
+
+    def send_data_to_channel(self, data):
+        try: self.socekt.write(data)
+        except: pass
+        return True
 
     def send_thread(self):
         sleep_timestamp = 0
@@ -231,22 +243,21 @@ class DataChannel(object):
                 req, req_data = self.send_queue_cache.popleft()
                 if req == 'SLEEP':
                     print 'SLEEP', req_data
-                    sleep_timestamp = time.time()
-                    sleep_timeout = req_data
-                    break
+                    if req_data < 0.5:
+                        ##time.sleep(req_data)
+                        try: self.send_thread_delay_queue.get(True, req_data)
+                        except: pass
+                        ##continue
+                        break
+                    else:
+                        sleep_timestamp = time.time()
+                        sleep_timeout = req_data
+                        break
                 elif req == 'sendPlainData':
                     pass
                 else:
                     req_data = self.paser_mix_data(req_data)
-                if req_data:
-                    if self.mode == 'tcp listen':
-                        if len(self.parent.dataChannel.clients) == 0: continue
-                        for s in self.parent.dataChannel.clients:
-                            try: s.send(req_data)
-                            except: pass
-                    else:
-                        try: self.socekt.write(req_data)
-                        except: pass
+                if req_data and self.send_data_to_channel(req_data):
                     if 'E' in self.parent.display_mode:
                         self.signal_msg.emit('appendEchoText', (self.parent, req_data))
                     self.parent.send_counts += len(req_data)
@@ -440,6 +451,13 @@ class tcpListenDataChannel(DataChannel):
         self.socekt = None
         self.status = 'Idle'
 
+    def send_data_to_channel(self, data):
+        if len(self.clients) == 0: return False
+        for s in self.clients.keys():
+            try: s.send(data)
+            except: pass
+        return True
+
     def tcp_listen_thread(self):
         try:
             self.socekt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -466,13 +484,9 @@ class tcpListenDataChannel(DataChannel):
             read_select_sockets += self.clients.keys()
 
             try:
-                readable, writable, exceptional = select.select(read_select_sockets, [], [], 0.01)
+                readable, writable, exceptional = select.select(read_select_sockets, [], [], 0.1)
             except:
-                readable = []
-                writable = []
-                exceptional = []
-                if writable: pass
-                if exceptional: pass
+                continue
 
             for s in readable:
                 if s is self.socekt:
@@ -506,6 +520,136 @@ class tcpListenDataChannel(DataChannel):
                         except: pass
 
 
+class udpAcceptedDataChannel(DataChannel):
+    def __init__(self, parent_dataBrowser=None,
+                 remote_socket=None, remote_address=None, listen_dataBrowser=None):
+        super(udpAcceptedDataChannel, self).__init__(parent_dataBrowser)
+        self.remote_socket = remote_socket
+        self.remote_address = remote_address
+        self.listen_dataBrowser = listen_dataBrowser
+        self.socekt = remote_socket
+
+    def start_link(self):
+        if self.socekt is None: return
+        if self.status != 'Idle': return
+        temp_str = 'accept client: %s:%s' % (self.remote_address[0], self.remote_address[1])
+        self.signal_msg.emit('newLineText', (self.parent, temp_str))
+        self.status = 'Connect'
+        super(udpAcceptedDataChannel, self).start_link()
+
+    def stop_link(self):
+        pass
+
+    def close(self):
+        print 'udpAcceptedDataChannel close'
+        super(udpAcceptedDataChannel, self).stop_link()
+        if self.socekt is None: return
+        if self.status == 'Closed': return
+        self.status = 'Closed'
+        self.socekt = None
+        ##temp_str = 'client closed: %s:%s' % (self.remote_address[0], self.remote_address[1])
+        ##self.signal_msg.emit('newLineText', (self.parent, temp_str))
+        ##self.signal_msg.emit('newLineText', (self.listen_dataBrowser, temp_str))
+        self.signal_msg.emit('dataChannelMsg', (self.listen_dataBrowser, ('closeClient', self.remote_address)))
+
+    def send_data_to_channel(self, data):
+        try: self.socekt.sendto(data, self.remote_address)
+        except: return False
+        return True
+
+
+class udpListenDataChannel(DataChannel):
+    def __init__(self, parent_dataBrowser=None):
+        super(udpListenDataChannel, self).__init__(parent_dataBrowser)
+        self.clients = dict()
+
+    def start_link(self):
+        if self.socekt is not None: return
+        if self.status != 'Idle': return
+        threading.Thread(target=self.udp_listen_thread, name='udp_listen_thread').start()
+        super(udpListenDataChannel, self).start_link()
+
+    def stop_link(self):
+        print 'udpListenDataChannel stop_link'
+        super(udpListenDataChannel, self).stop_link()
+        if self.status == 'Idle': return
+        if self.socekt is None: return
+        try: self.socekt.close()
+        except: pass
+        self.clients.clear()
+        self.socekt = None
+        self.status = 'Idle'
+
+    def send_data_to_channel(self, data):
+        retval = False
+        for addr in self.clients.keys():
+            if self.clients[addr]: continue
+            retval = True
+            try: self.socekt.sendto(data, addr)
+            except: pass
+        return retval
+
+    def local_msg_handler(self, msg):
+        if self.socekt is None: return
+        msg_type, msg_data = msg
+        if msg_type == 'recvData':
+            data, addr = msg_data
+            if not self.clients.has_key(addr):
+                temp_str = 'client accepted: %s:%s' % (addr[0], addr[1])
+                self.signal_msg.emit('newLineText', (self.parent, temp_str))
+                self.clients[addr] = None
+                if not self.parent.singleTab:
+                    data_Browser = dataBrowser(self.parent.parent, self.parent.MainWindow, self.parent.main_module,
+                                               'AU:%s:%d:%s' % (addr[0], addr[1], self.parent.display_mode),
+                                               self.socekt, addr, self.parent)
+                    data_Browser.start_link()
+                    self.signal_msg.emit('remoteDataBrowserTab', data_Browser)
+                    self.clients[addr] = data_Browser
+            if self.clients[addr]:
+                self.signal_msg.emit('appendText', (self.clients[addr], data))
+            else:
+                addr_str = '%s:%s' % (addr[0], addr[1])
+                self.signal_msg.emit('appendIPText', (self.parent, (addr_str, data)))
+        elif msg_type == 'closeClient':
+            addr = msg_data
+            if not self.clients.has_key(addr): return
+            del self.clients[addr]
+            temp_str = 'client closed: %s:%s' % (addr[0], addr[1])
+            self.signal_msg.emit('newLineText', (self.parent, temp_str))
+
+    def udp_listen_thread(self):
+        try:
+            self.socekt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.socekt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socekt.bind((self.ip_str, int(self.port_str)))
+            self.socekt.settimeout(0.1)
+            ##self.socekt.setblocking(False)
+        except:
+            if self.socekt is not None:
+                self.socekt.close()
+            self.socekt = None
+            self.status = 'Idle'
+            self.signal_msg.emit('newLineText', (self.parent, 'creat socket error.'))
+            print 'creat socket error'
+            return
+
+        self.status = 'Listen'
+        self.signal_msg.emit('newLineText', (self.parent, 'Listen start'))
+        self.clients.clear()
+
+        while self.socekt is not None:
+            try:
+                readable, writable, exceptional = select.select([self.socekt], [], [], 0.1)
+            except:
+                continue
+            if len(readable):
+                try:
+                    data, addr = self.socekt.recvfrom(2048)
+                    self.signal_msg.emit('dataChannelMsg', (self.parent, ('recvData', (data, addr))))
+                except:
+                    pass
+
+
 class dataBrowser(QtGui.QPlainTextEdit):
     def __init__(self, parent=None, MainWindow=None, main_module=None, linkStr=None,
                  remote_socket=None, remote_address=None, listen_DataBrowser=None):
@@ -532,6 +676,10 @@ class dataBrowser(QtGui.QPlainTextEdit):
             self.dataChannel = tcpAcceptedDataChannel(self, remote_socket, remote_address, listen_DataBrowser)
         elif self.mode == 'tcp listen':
             self.dataChannel = tcpListenDataChannel(self)
+        elif self.mode == 'udp accept client':
+            self.dataChannel = udpAcceptedDataChannel(self, remote_socket, remote_address, listen_DataBrowser)
+        elif self.mode == 'udp listen':
+            self.dataChannel = udpListenDataChannel(self)
         if 'L' in self.display_mode: self.start_log()
 
     def paser_linkStr(self, linkStr):
@@ -594,6 +742,9 @@ class dataBrowser(QtGui.QPlainTextEdit):
         if self.mode == 'com' and self.port_str.count(':') == 0:
             head_str += ':115200'
         head_str += ':' + self.port_str
+        if self.mode == 'tcp listen' or self.mode == 'udp listen':
+            if self.singleTab:
+                head_str += ':S'
         return head_str
 
     def genarat_display_str(self, disp_type, data, ip_address):
@@ -637,6 +788,9 @@ class dataBrowser(QtGui.QPlainTextEdit):
         return disp_str
 
     def display_msg_handler(self, msq_type, msq_data):
+        if msq_type == 'dataChannelMsg':
+            self.dataChannel.local_msg_handler(msq_data)
+            return
         self.moveCursor(QtGui.QTextCursor.End)
         disp_str = ''
         if msq_type == 'appendIPText':
@@ -683,16 +837,26 @@ class dataBrowser(QtGui.QPlainTextEdit):
         if self.dataChannel is None: return
         self.dataChannel.stop_link()
 
+    def close(self):
+        if self.dataChannel is None: return
+        self.dataChannel.close()
+
     def paser_mix_data(self, data):
         mix_command = data.split(':')[0].upper()
         if 'S' == mix_command:
-            ##time.sleep(float(data[2:]))
-            self.dataChannel.send_queue_cache.appendleft(('SLEEP', float(data[2:])))
+            delay = float(data[2:])
+            ##if delay < 0.5:
+            ##    ##time.sleep(delay)
+            ##    try: self.dataChannel.send_thread_delay_queue.get(True, delay)
+            ##    except: pass
+            ##else:
+            ##    self.dataChannel.send_queue_cache.appendleft(('SLEEP', delay))
+            self.dataChannel.send_queue_cache.appendleft(('SLEEP', delay))
             return ''
         elif 'M' == mix_command:
             data = data[2:]
         bytes_data = bytes(data)
-        ##print 'paser_mix_data', bytes_data
+        ##print 'paser_mix_data', bytes_data##
         return_data = ''
         while True:
             start_index = bytes_data.find('[')

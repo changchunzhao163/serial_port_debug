@@ -194,6 +194,7 @@ class Ui_MainWindow(object):
             'appendIPText':           self.display_message_handler,
             'appendEchoText':         self.display_message_handler,
             'newLineText':            self.display_message_handler,
+            'dataChannelMsg':         self.display_message_handler,
             'closeEvent':             self.closeEvent_message_handler,
             'sendPlainData':          self.sendData_message_handler,
             'sendMixData':            self.sendData_message_handler,
@@ -353,8 +354,8 @@ class Ui_MainWindow(object):
         print 'close dataBrowserTab', index
         tabWidget = self.dataBrowserTab.widget(index)
         tabWidget.stop_link()
+        tabWidget.close()
         self.dataBrowserTab.removeTab(index)
-        tabWidget.destroy()
 
     @QtCore.pyqtSlot()
     def commandBrowserTab_currentChanged(self, index):
@@ -368,7 +369,7 @@ class Ui_MainWindow(object):
         print 'close commandBrowserTab', index
         tabWidget = self.commandBrowserTab.widget(index)
         self.commandBrowserTab.removeTab(index)
-        tabWidget.destroy()
+        ##tabWidget.destroy()
 
     @QtCore.pyqtSlot()
     def display_add_triggered(self):
