@@ -20,6 +20,35 @@ except AttributeError:
         return QtGui.QApplication.translate(context, text, disambig)
 
 
+class myQPlainTextEdit(QtGui.QPlainTextEdit):
+    def __init__(self, parent=None):
+        super(myQPlainTextEdit, self).__init__(parent)
+        self.save_shortcut = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+S'), self)
+        self.save_shortcut.setContext(QtCore.Qt.WidgetShortcut)
+        self.save_shortcut.activated.connect(self.save_shortcut_activated)
+        self.plainTextMode = True
+        try:
+            with open('sendDailog.txt', 'rb') as fd:
+                val = fd.read().decode('gbk').replace('\r\n', '\n')
+        except:
+            val = ''
+        val_split =  val.split('\n')
+        if val_split[0] == 'MixDataMode':
+            self.plainTextMode = False
+            val = val.replace('MixDataMode\n', '', 1)
+        self.setPlainText(val)
+
+    @QtCore.pyqtSlot()
+    def save_shortcut_activated(self):
+        with open('sendDailog.txt', 'wb') as fd:
+            val = unicode(self.toPlainText())
+            if not self.plainTextMode:
+                val = 'MixDataMode\n' + val
+            val = val.encode('gbk').replace('\n', '\r\n')
+            ##print val
+            fd.write(val)
+
+
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow, main_module):
         self.MainWindow = MainWindow
@@ -51,7 +80,8 @@ class Ui_MainWindow(object):
         self.sendFrame.setFixedHeight(120)
         qhboxlayout = QtGui.QHBoxLayout(self.sendFrame)
         qhboxlayout.setContentsMargins(5, 5, 5, 5)
-        self.sendText = QtGui.QPlainTextEdit(self.sendFrame)
+        ##self.sendText = QtGui.QPlainTextEdit(self.sendFrame)
+        self.sendText = myQPlainTextEdit(self.sendFrame)
         qhboxlayout.addWidget(self.sendText)
         qhboxlayout.addSpacing(15)
 
@@ -66,7 +96,11 @@ class Ui_MainWindow(object):
         self.radiobutton_plain = QtGui.QRadioButton(u'简单字符串', self.sendFrame)
         qvboxlayout.addWidget(self.radiobutton_plain)
         self.radiobutton_mix = QtGui.QRadioButton(u'组合字符串', self.sendFrame)
-        self.radiobutton_plain.setChecked(True)
+        ##self.radiobutton_plain.setChecked(True)
+        if self.sendText.plainTextMode:
+            self.radiobutton_plain.setChecked(True)
+        else:
+            self.radiobutton_mix.setChecked(True)
         qvboxlayout.addWidget(self.radiobutton_mix)
         qvboxlayout.addSpacing(10)
 
@@ -367,7 +401,7 @@ class Ui_MainWindow(object):
     def commandBrowserTab_CloseRequested(self, index):
         if index == 0: return
         print 'close commandBrowserTab', index
-        tabWidget = self.commandBrowserTab.widget(index)
+        ##tabWidget = self.commandBrowserTab.widget(index)
         self.commandBrowserTab.removeTab(index)
         ##tabWidget.destroy()
 
@@ -405,12 +439,15 @@ class Ui_MainWindow(object):
     def pushbutton_send_clicked(self):
         data = unicode(self.sendText.toPlainText())
         if self.radiobutton_plain.isChecked():
+            self.sendText.plainTextMode = True
             data = data.replace('\n', '\r\n')
             self.MainWindow_message.signal_msg.emit('sendPlainData', data)
         else:
+            self.sendText.plainTextMode = False
             data_split = data.split('\n')
             for data in data_split:
                 self.MainWindow_message.signal_msg.emit('sendMixData', data)
+        self.sendText.save_shortcut_activated()
 
     @QtCore.pyqtSlot()
     def display_clear_triggered(self):
