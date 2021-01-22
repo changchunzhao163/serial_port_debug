@@ -27,6 +27,7 @@ class myQPlainTextEdit(QtGui.QPlainTextEdit):
         self.save_shortcut.setContext(QtCore.Qt.WidgetShortcut)
         self.save_shortcut.activated.connect(self.save_shortcut_activated)
         self.plainTextMode = True
+        self.text_changed = False
         try:
             with open('sendDailog.txt', 'rb') as fd:
                 val = fd.read().decode('gbk').replace('\r\n', '\n')
@@ -37,9 +38,17 @@ class myQPlainTextEdit(QtGui.QPlainTextEdit):
             self.plainTextMode = False
             val = val.replace('MixDataMode\n', '', 1)
         self.setPlainText(val)
+        self.textChanged.connect(self.text_changed_handler)
+
+    def setPlainTextMode(self, mode):
+        if self.plainTextMode != mode:
+            self.plainTextMode = mode
+            self.text_changed = True
 
     @QtCore.pyqtSlot()
     def save_shortcut_activated(self):
+        if not self.text_changed: return
+        self.text_changed = False
         with open('sendDailog.txt', 'wb') as fd:
             val = unicode(self.toPlainText())
             if not self.plainTextMode:
@@ -47,6 +56,11 @@ class myQPlainTextEdit(QtGui.QPlainTextEdit):
             val = val.encode('gbk').replace('\n', '\r\n')
             ##print val
             fd.write(val)
+
+    @QtCore.pyqtSlot()
+    def text_changed_handler(self):
+        ##print 'text_changed_handler'
+        self.text_changed = True
 
 
 class Ui_MainWindow(object):
@@ -439,11 +453,11 @@ class Ui_MainWindow(object):
     def pushbutton_send_clicked(self):
         data = unicode(self.sendText.toPlainText())
         if self.radiobutton_plain.isChecked():
-            self.sendText.plainTextMode = True
+            self.sendText.setPlainTextMode(True)
             data = data.replace('\n', '\r\n')
             self.MainWindow_message.signal_msg.emit('sendPlainData', data)
         else:
-            self.sendText.plainTextMode = False
+            self.sendText.setPlainTextMode(False)
             data_split = data.split('\n')
             for data in data_split:
                 self.MainWindow_message.signal_msg.emit('sendMixData', data)
