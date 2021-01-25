@@ -11,6 +11,8 @@ import collections
 import serial
 import select
 
+dt_boot =  datetime.datetime.now()
+
 def crc16_c(Tar, res=0xFFFF):
     # 查表法计算crc16值，利用给定的表格，计算目标字符串的crc值
     # CRC-16        多项式：x16+x15+x2+1            8005      IBM SDLC
@@ -162,6 +164,12 @@ class msgSignal(QtCore.QObject):
         super(msgSignal, self).__init__(parent)
 
 
+def timestamp_from_bootime(dt=None):
+    if dt == None: dt = datetime.datetime.now()
+    delt_dt = dt - dt_boot
+    ##return time.mktime(delt_dt.timetuple()) + delt_dt.microsecond/1000000.0
+    return delt_dt.days * 24 * 60 * 60 + delt_dt.seconds + delt_dt.microseconds/1000000.0
+
 class DataChannel(object):
     def __init__(self, parent_dataBrowser=None):
         self.parent = parent_dataBrowser
@@ -202,7 +210,7 @@ class DataChannel(object):
         if self.mode == 'tcp listen' or self.mode == 'udp listen':
             if self.status != 'Listen': return
         elif self.status != 'Connect': return
-        self.send_thread_queue.put((data_type, data))
+        self.send_thread_queue.put_nowait((data_type, data))
 
     def send_data_to_channel(self, data):
         try: self.socekt.write(data)
@@ -210,10 +218,18 @@ class DataChannel(object):
         return True
 
     def send_thread(self):
-        sleep_timestamp = 0
-        sleep_timeout = None
+        sleep_timeout_timestamp = None
         self.send_queue_cache.clear()
+        timestamp = time.time()
         while True:
+            if sleep_timeout_timestamp:
+                sleep_timeout = sleep_timeout_timestamp - timestamp_from_bootime()
+                ##print 'sleep_timeout', sleep_timeout
+                if sleep_timeout <= 0:
+                    sleep_timeout = 0
+                    sleep_timeout_timestamp = None
+            else:
+                sleep_timeout = None
             try:
                 req, req_data = self.send_thread_queue.get(True, sleep_timeout)
                 if req == 'EXIT':
@@ -226,40 +242,30 @@ class DataChannel(object):
                     if self.status != 'Listen': continue
                 elif self.status != 'Connect': continue
                 self.send_queue_cache.append((req, req_data))
+                ##if not self.send_thread_queue.empty(): continue
             except:
+                ##sleep_timeout_timestamp = None
                 pass
 
-            if sleep_timeout:
-                current_time = time.time()
-                delta_time = current_time - sleep_timestamp
-                if delta_time < sleep_timeout:
-                    sleep_timeout = sleep_timeout - delta_time
-                    sleep_timestamp = current_time
-                    continue
-                else:
-                    sleep_timeout = None
+            if sleep_timeout_timestamp and (sleep_timeout_timestamp - timestamp_from_bootime()) > 0:
+                continue
 
             while len(self.send_queue_cache) > 0:
                 req, req_data = self.send_queue_cache.popleft()
                 if req == 'SLEEP':
-                    print 'SLEEP', req_data
-                    if req_data < 0.5:
-                        ##time.sleep(req_data)
-                        try: self.send_thread_delay_queue.get(True, req_data)
-                        except: pass
-                        ##continue
-                        break
-                    else:
-                        sleep_timestamp = time.time()
-                        sleep_timeout = req_data
-                        break
+                    sleep_timeout_timestamp = timestamp + req_data
+                    break
                 elif req == 'sendPlainData':
                     pass
                 else:
                     req_data = self.paser_mix_data(req_data)
+                datetimestamp = datetime.datetime.now()
+                timestamp = timestamp_from_bootime(datetimestamp)
+                ##print 'timestamp', timestamp, datetimestamp.microsecond
                 if req_data and self.send_data_to_channel(req_data):
                     if 'E' in self.parent.display_mode:
-                        self.signal_msg.emit('appendEchoText', (self.parent, req_data))
+                        self.signal_msg.emit('appendEchoText', (self.parent, (req_data, datetimestamp)))
+                        ##print 'send used time', time.time() - timestamp
                     self.parent.send_counts += len(req_data)
                     self.signal_msg.emit('statusChange', self.parent)
 
@@ -354,7 +360,7 @@ class clientPortDataChannel(DataChannel):
 
         while self.socekt is not None:
             try:
-                data = self.socekt.read(1024)
+                data = self.socekt.read(2048)
                 if not data: continue
             except:
                 if self.socekt is not None:
@@ -362,7 +368,7 @@ class clientPortDataChannel(DataChannel):
                     self.signal_msg.emit('newLineText', (self.parent, 'peer disconnect.'))
                     ##self.signal_msg.emit('statusChange', self.parent)
                 break
-            self.signal_msg.emit('appendText', (self.parent, data))
+            self.signal_msg.emit('appendText', (self.parent, (data, datetime.datetime.now())))
             ##self.recv_counts += len(data)
             ##self.signal_msg.emit('statusChange', self)
 
@@ -416,7 +422,7 @@ class tcpAcceptedDataChannel(DataChannel):
                     temp_str = 'client closed: %s:%s' % (self.remote_address[0], self.remote_address[1])
                     self.signal_msg.emit('newLineText', (self.listen_dataBrowser, temp_str))
                 break
-            self.signal_msg.emit('appendText', (self.parent, data))
+            self.signal_msg.emit('appendText', (self.parent, (data, datetime.datetime.now())))
             ##self.recv_counts += len(data)
             ##self.signal_msg.emit('statusChange', self)
 
@@ -508,7 +514,7 @@ class tcpListenDataChannel(DataChannel):
                         data = s.recv(1024)
                         if data:
                             addr_str = '%s:%s' % (self.clients[s][0], self.clients[s][1])
-                            self.signal_msg.emit('appendIPText', (self.parent, (addr_str, data)))
+                            self.signal_msg.emit('appendIPText', (self.parent, (addr_str, data, datetime.datetime.now())))
                     except Exception as e:
                         print 'read Exception', e
                         data = None
@@ -606,10 +612,10 @@ class udpListenDataChannel(DataChannel):
                     self.signal_msg.emit('remoteDataBrowserTab', data_Browser)
                     self.clients[addr] = data_Browser
             if self.clients[addr]:
-                self.signal_msg.emit('appendText', (self.clients[addr], data))
+                self.signal_msg.emit('appendText', (self.clients[addr], (data, datetime.datetime.now())))
             else:
                 addr_str = '%s:%s' % (addr[0], addr[1])
-                self.signal_msg.emit('appendIPText', (self.parent, (addr_str, data)))
+                self.signal_msg.emit('appendIPText', (self.parent, (addr_str, data, datetime.datetime.now())))
         elif msg_type == 'closeClient':
             addr = msg_data
             if not self.clients.has_key(addr): return
@@ -747,13 +753,14 @@ class dataBrowser(QtGui.QPlainTextEdit):
                 head_str += ':S'
         return head_str
 
-    def genarat_display_str(self, disp_type, data, ip_address):
+    def genarat_display_str(self, disp_type, data, ip_address, timestamp):
         disp_str = ''
         if self.last_new_line == 0 and disp_type == 'appendEchoText':
             disp_str += '\n'
             self.last_new_line = 1
         if 'T' in self.display_mode:
-            time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            ##time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            time_str = timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             disp_str += '\n' * (2 - self.last_new_line)
             if disp_type == 'appendText':
                 if ip_address:
@@ -787,20 +794,24 @@ class dataBrowser(QtGui.QPlainTextEdit):
 
         return disp_str
 
-    def display_msg_handler(self, msq_type, msq_data):
+    def msg_handler(self, msq_type, msq_data):
         if msq_type == 'dataChannelMsg':
             self.dataChannel.local_msg_handler(msq_data)
             return
         self.moveCursor(QtGui.QTextCursor.End)
         disp_str = ''
         if msq_type == 'appendIPText':
-            ip_address, data = msq_data
+            ip_address, data, timestamp = msq_data
             msq_type = 'appendText'
+        elif msq_type == 'appendText' or msq_type == 'appendEchoText':
+            ip_address = ''
+            data, timestamp = msq_data
         else:
             ip_address = ''
+            timestamp = datetime.datetime.now()
             data = msq_data
         if msq_type == 'appendText' or msq_type == 'appendEchoText':
-            disp_str = self.genarat_display_str(msq_type, data, ip_address)
+            disp_str = self.genarat_display_str(msq_type, data, ip_address, timestamp)
             if '\n' == disp_str[-1:]:
                 self.last_new_line = 1
             else:
@@ -811,7 +822,8 @@ class dataBrowser(QtGui.QPlainTextEdit):
                     self.last_new_line = 0
         else:
             if data:
-                time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                ##time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                time_str = timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 time_str = '--- ' + time_str + ' ---'
                 disp_str += '\n' * (2 - self.last_new_line)
                 disp_str += time_str + '\n' + data + '\n'

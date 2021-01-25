@@ -238,11 +238,11 @@ class Ui_MainWindow(object):
         self.commandBrowser_edit_mode.triggered.connect(self.edit_mode_triggered)
 
         self.message_handler_switch = {
-            'appendText':             self.display_message_handler,
-            'appendIPText':           self.display_message_handler,
-            'appendEchoText':         self.display_message_handler,
-            'newLineText':            self.display_message_handler,
-            'dataChannelMsg':         self.display_message_handler,
+            'appendText':             self.tabWidget_message_handler,
+            'appendIPText':           self.tabWidget_message_handler,
+            'appendEchoText':         self.tabWidget_message_handler,
+            'newLineText':            self.tabWidget_message_handler,
+            'dataChannelMsg':         self.tabWidget_message_handler,
             'closeEvent':             self.closeEvent_message_handler,
             'sendPlainData':          self.sendData_message_handler,
             'sendMixData':            self.sendData_message_handler,
@@ -279,9 +279,9 @@ class Ui_MainWindow(object):
         tabWidget = self.dataBrowserTab.currentWidget()
         if tabWidget: tabWidget.send_data(msg_type, msg_data)
 
-    def display_message_handler(self, msg_type, msg_data):
-        tabWidget, disp_str = msg_data
-        tabWidget.display_msg_handler(msg_type, disp_str)
+    def tabWidget_message_handler(self, msg_type, msg_data):
+        tabWidget, tabWidget_msg = msg_data
+        tabWidget.msg_handler(msg_type, tabWidget_msg)
 
     def closeEvent_message_handler(self, msg_type, msg_data):
         ##print 'closeEvent_message_handler'

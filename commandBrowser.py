@@ -11,6 +11,7 @@ class commandBrowser(QtGui.QPlainTextEdit):
         self.file_name = file_name
         self.edit_mode = False
         ##self.setReadOnly(True)
+        self.setLineWrapMode(QtGui.QPlainTextEdit.NoWrap)
         self.save_shortcut = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+S'), self)
         self.save_shortcut.setContext(QtCore.Qt.WidgetShortcut)
         self.save_shortcut.activated.connect(self.save_shortcut_activated)
