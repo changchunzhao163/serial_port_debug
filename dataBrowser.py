@@ -179,11 +179,15 @@ class DataChannel(object):
         self.ip_str = parent_dataBrowser.ip_str
         self.port_str = parent_dataBrowser.port_str
         self.signal_msg = parent_dataBrowser.signal_msg
-        self.paser_mix_data = parent_dataBrowser.paser_mix_data
+        ##self.paser_mix_data = parent_dataBrowser.paser_mix_data
         self.send_queue_cache = collections.deque()
         self.send_thread_queue = Queue.Queue(200)
         self.send_thread_running = False
-        self.send_thread_delay_queue = Queue.Queue(1)
+        ##self.send_thread_delay_queue = Queue.Queue(1)
+        self.data_sending = False
+        self.send_loop_queue_cache = collections.deque()
+        self.loop_start_flag = False
+        self.loop_count = 16
 
     def start_link(self):
         if not self.send_thread_running:
@@ -196,6 +200,7 @@ class DataChannel(object):
         if self.send_thread_running:
             self.send_thread_queue.put(('EXIT', ''))
             self.send_thread_running = False
+        self.data_sending = False
         self.signal_msg.emit('newLineText', (self.parent, 'disconnect.'))
         ##self.signal_msg.emit('statusChange', self)
 
@@ -205,12 +210,82 @@ class DataChannel(object):
     def local_msg_handler(self, msg):
         pass
 
+    def paser_mix_data(self, data):
+        data_split = data.split(':')
+        mix_command = data_split[0].upper()
+
+        if 'LOOP' == mix_command:
+            if self.loop_start_flag:
+                self.loop_start_flag = False
+                if len(self.send_loop_queue_cache) > 0 and self.loop_count != 0:
+                    self.send_queue_cache.appendleft(('sendMixData', 'LOOP:END'))
+                    while len(self.send_loop_queue_cache) > 0:
+                        req_data = self.send_loop_queue_cache.pop()
+                        self.send_queue_cache.appendleft(('sendMixData', req_data))
+                    self.send_queue_cache.appendleft(('sendMixData', 'LOOP:%d' % self.loop_count))
+                else:
+                    self.send_loop_queue_cache.clear()
+            else:
+                self.loop_count = 16
+                self.loop_start_flag = True
+                if len(data_split) > 1:
+                    if data_split[1] == 'END':
+                        self.loop_start_flag = False
+                        self.send_loop_queue_cache.clear()
+                    else:
+                        try: self.loop_count = int(data_split[1])
+                        except: self.loop_count = 16
+                self.loop_count -= 1
+            return ''
+        if self.loop_start_flag:
+            self.send_loop_queue_cache.append(data)
+
+        if 'S' == mix_command:
+            delay = float(data[2:])
+            self.send_queue_cache.appendleft(('SLEEP', delay))
+            return ''
+        elif 'M' == mix_command:
+            data = data[2:]
+        bytes_data = bytes(data)
+        ##print 'paser_mix_data', bytes_data##
+        return_data = ''
+        while True:
+            start_index = bytes_data.find('[')
+            if start_index == -1: break
+            end_index = bytes_data.find(']')
+            if end_index == -1: break
+            return_data += bytes_data[0:start_index]
+            hex_str = bytes_data[start_index + 1:end_index]
+            ##print 'hex_str', hex_str
+            if len(bytes_data) > (end_index + 1):
+                bytes_data = bytes_data[end_index + 1:]
+            else:
+                bytes_data = ''
+            if not hex_str: continue
+            hex_str_split = hex_str.split(' ')
+            for h in hex_str_split:
+                if h.upper() == 'CRC16':
+                    return_data += binascii.a2b_hex(crc16_c(return_data))
+                    continue
+                if len(h) == 1: h = '0' + h
+                if (len(h) % 2) != 0:
+                    print 'format error'
+                    self.signal_msg.emit('statusBarFlashText', u'输入格式错误')
+                    return ''
+                return_data += binascii.a2b_hex(h)
+        return_data += bytes_data
+        return return_data
+
     def send_data(self, data_type, data):
-        if self.socekt is None: return
+        if self.socekt is None: return False
         if self.mode == 'tcp listen' or self.mode == 'udp listen':
-            if self.status != 'Listen': return
-        elif self.status != 'Connect': return
+            if self.status != 'Listen': return False
+        elif self.status != 'Connect': return False
         self.send_thread_queue.put_nowait((data_type, data))
+        return True
+
+    def stop_send_data(self):
+        self.send_thread_queue.put_nowait(('STOP', ''))
 
     def send_data_to_channel(self, data):
         try: self.socekt.write(data)
@@ -230,6 +305,13 @@ class DataChannel(object):
                     sleep_timeout_timestamp = None
             else:
                 sleep_timeout = None
+                if self.data_sending \
+                        and self.send_thread_queue.empty() \
+                        and len(self.send_queue_cache) == 0\
+                        and not self.loop_start_flag \
+                        and len(self.send_loop_queue_cache) == 0:
+                    self.data_sending = False
+                    self.signal_msg.emit('statusChange', self.parent)
             try:
                 req, req_data = self.send_thread_queue.get(True, sleep_timeout)
                 if req == 'EXIT':
@@ -237,11 +319,26 @@ class DataChannel(object):
                     while not self.send_thread_queue.empty():
                         self.send_thread_queue.get(False)
                     return
+                elif req == 'STOP':
+                    print 'send_thread STOP'
+                    sleep_timeout_timestamp = None
+                    exit_flag = False
+                    while not self.send_thread_queue.empty():
+                        req, req_data = self.send_thread_queue.get(False)
+                        if req == 'EXIT': exit_flag = True
+                    self.send_queue_cache.clear()
+                    self.send_loop_queue_cache.clear()
+                    self.loop_start_flag = False
+                    if exit_flag: return
+                    continue
                 if self.socekt is None: continue
                 if self.mode == 'tcp listen' or self.mode == 'udp listen':
                     if self.status != 'Listen': continue
                 elif self.status != 'Connect': continue
                 self.send_queue_cache.append((req, req_data))
+                if not self.data_sending:
+                    self.data_sending = True
+                    self.signal_msg.emit('statusChange', self.parent)
                 ##if not self.send_thread_queue.empty(): continue
             except:
                 ##sleep_timeout_timestamp = None
@@ -688,6 +785,20 @@ class dataBrowser(QtGui.QPlainTextEdit):
             self.dataChannel = udpListenDataChannel(self)
         if 'L' in self.display_mode: self.start_log()
 
+        self.cursorPositionChanged.connect(self.highligtCurrentLine)
+
+    @QtCore.pyqtSlot()
+    def highligtCurrentLine(self):
+        selection = QtGui.QTextEdit.ExtraSelection()
+        selection.format.setBackground(QtGui.QColor(QtCore.Qt.gray).lighter(130))
+        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+        selection.cursor = self.textCursor()
+        selection.cursor.clearSelection()
+        ##extraSelection.clear()
+        extraSelection = [selection]
+        ##extraSelection.append(selection)
+        self.setExtraSelections(extraSelection)
+
     def paser_linkStr(self, linkStr):
         # linkStr 格式, ':'号分割
         # 'T', 'AT', 'U', 'AU', 'TL', 'UL', ''
@@ -853,53 +964,13 @@ class dataBrowser(QtGui.QPlainTextEdit):
         if self.dataChannel is None: return
         self.dataChannel.close()
 
-    def paser_mix_data(self, data):
-        mix_command = data.split(':')[0].upper()
-        if 'S' == mix_command:
-            delay = float(data[2:])
-            ##if delay < 0.5:
-            ##    ##time.sleep(delay)
-            ##    try: self.dataChannel.send_thread_delay_queue.get(True, delay)
-            ##    except: pass
-            ##else:
-            ##    self.dataChannel.send_queue_cache.appendleft(('SLEEP', delay))
-            self.dataChannel.send_queue_cache.appendleft(('SLEEP', delay))
-            return ''
-        elif 'M' == mix_command:
-            data = data[2:]
-        bytes_data = bytes(data)
-        ##print 'paser_mix_data', bytes_data##
-        return_data = ''
-        while True:
-            start_index = bytes_data.find('[')
-            if start_index == -1: break
-            end_index = bytes_data.find(']')
-            if end_index == -1: break
-            return_data += bytes_data[0:start_index]
-            hex_str = bytes_data[start_index + 1:end_index]
-            ##print 'hex_str', hex_str
-            if len(bytes_data) > (end_index + 1):
-                bytes_data = bytes_data[end_index + 1:]
-            else:
-                bytes_data = ''
-            if not hex_str: continue
-            hex_str_split = hex_str.split(' ')
-            for h in hex_str_split:
-                if h.upper() == 'CRC16':
-                    return_data += binascii.a2b_hex(crc16_c(return_data))
-                    continue
-                if len(h) == 1: h = '0' + h
-                if (len(h) % 2) != 0:
-                    print 'format error'
-                    self.signal_msg.emit('statusBarFlashText', u'输入格式错误')
-                    return ''
-                return_data += binascii.a2b_hex(h)
-        return_data += bytes_data
-        return return_data
-
     def send_data(self, data_type, data):
+        if self.dataChannel is None or not self.dataChannel.send_data(data_type, data):
+            self.signal_msg.emit('statusChange', self)
+
+    def stop_send_data(self):
         if self.dataChannel is None: return
-        self.dataChannel.send_data(data_type, data)
+        self.dataChannel.stop_send_data()
 
     def get_status(self):
         if self.dataChannel is None: return ''

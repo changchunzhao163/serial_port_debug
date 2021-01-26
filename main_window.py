@@ -91,7 +91,8 @@ class Ui_MainWindow(object):
         self.sendFrame = QtGui.QFrame(self.leftSplitter)
         self.sendFrame.setFrameShape(QtGui.QFrame.NoFrame)
         self.sendFrame.setFrameShadow(QtGui.QFrame.Plain)
-        self.sendFrame.setFixedHeight(120)
+        ##self.sendFrame.setFixedHeight(120)
+        self.sendFrame.setMinimumHeight(140)
         qhboxlayout = QtGui.QHBoxLayout(self.sendFrame)
         qhboxlayout.setContentsMargins(5, 5, 5, 5)
         ##self.sendText = QtGui.QPlainTextEdit(self.sendFrame)
@@ -106,6 +107,7 @@ class Ui_MainWindow(object):
         self.pushbutton_send = QtGui.QPushButton(u'发送', self.sendFrame)
         self.pushbutton_send.setFixedWidth(100)
         qvboxlayout.addWidget(self.pushbutton_send)
+        self.data_sending = False
 
         self.radiobutton_plain = QtGui.QRadioButton(u'简单字符串', self.sendFrame)
         qvboxlayout.addWidget(self.radiobutton_plain)
@@ -373,7 +375,16 @@ class Ui_MainWindow(object):
         if not tabWidget:
             self.statusBar_connect_status.setText('')
             self.statusBar_rs_count.setText('')
+            if self.data_sending:
+                self.pushbutton_send.setText(u'发送')
+                self.data_sending = False
             return
+
+        if self.data_sending and not tabWidget.dataChannel.data_sending:
+            self.pushbutton_send.setText(u'发送')
+        elif tabWidget.dataChannel.data_sending and not self.data_sending:
+            self.pushbutton_send.setText(u'停止发送')
+        self.data_sending = tabWidget.dataChannel.data_sending
 
         if self.get_toolbar_display_mode() != tabWidget.display_mode:
             self.set_toolbar_display_mode(tabWidget.display_mode)
@@ -451,17 +462,35 @@ class Ui_MainWindow(object):
 
     @QtCore.pyqtSlot()
     def pushbutton_send_clicked(self):
+        self.sendText.save_shortcut_activated()
+
+        tabWidget = self.dataBrowserTab.currentWidget()
+        if not tabWidget: return
+
+        if self.data_sending:
+            tabWidget.stop_send_data()
+            return
+
         data = unicode(self.sendText.toPlainText())
+        self.data_sending = True
+        self.pushbutton_send.setText(u'停止发送')
         if self.radiobutton_plain.isChecked():
             self.sendText.setPlainTextMode(True)
             data = data.replace('\n', '\r\n')
-            self.MainWindow_message.signal_msg.emit('sendPlainData', data)
+            ##self.MainWindow_message.signal_msg.emit('sendPlainData', data)
+            tabWidget.send_data('sendPlainData', data)
         else:
             self.sendText.setPlainTextMode(False)
             data_split = data.split('\n')
+            send_loop_end = False
             for data in data_split:
-                self.MainWindow_message.signal_msg.emit('sendMixData', data)
-        self.sendText.save_shortcut_activated()
+                ##self.MainWindow_message.signal_msg.emit('sendMixData', data)
+                tabWidget.send_data('sendMixData', data)
+                if len(data) >= 5 and data[0:5].upper() == 'LOOP:':
+                    send_loop_end = not send_loop_end
+            if send_loop_end:
+                ##self.MainWindow_message.signal_msg.emit('sendMixData', 'LOOP:END')
+                tabWidget.send_data('sendMixData', 'LOOP:END')
 
     @QtCore.pyqtSlot()
     def display_clear_triggered(self):

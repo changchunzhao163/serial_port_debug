@@ -51,13 +51,13 @@ class commandBrowser(QtGui.QPlainTextEdit):
         textBlock = textDocument.findBlockByLineNumber(lineNumber)
         try:
             selectLine = unicode(textBlock.text())
-            if selectLine[0:1] == '#': return
             if len(selectLine) == 0: return
+            if selectLine[0:1] == '#': return
             msg_type = 'sendPlainData'
             msg_data = selectLine + '\r\n'
             if len(selectLine) > 2:
                 mix_command = selectLine.split(':')[0].upper()
-                if mix_command == 'M':
+                if mix_command in ['M', 'S', 'LOOP']:
                     msg_type = 'sendMixData'
                     msg_data = selectLine
                 elif mix_command == 'F':
