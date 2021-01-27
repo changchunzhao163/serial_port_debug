@@ -150,6 +150,9 @@ class Ui_MainWindow(object):
         self.statusBar_rs_count = QtGui.QLabel(self.statusBar)
         self.statusBar_rs_count.setAlignment(QtCore.Qt.AlignCenter)
         self.statusBar.addWidget(self.statusBar_rs_count, 2)
+        self.statusBar_code = QtGui.QLabel(self.statusBar)
+        self.statusBar_code.setAlignment(QtCore.Qt.AlignCenter)
+        self.statusBar.addWidget(self.statusBar_code, 1)
 
         # toolbar
         self.toolBar = QtGui.QToolBar(MainWindow)
@@ -256,6 +259,7 @@ class Ui_MainWindow(object):
             'newDataBrowserTab':      self.newDataBrowserTab_message_handler,
             'remoteDataBrowserTab':   self.remoteDataBrowserTab_message_handler,
             'acceptedDataBrowserTab': self.acceptedDataBrowserTab_message_handler,
+            'setCode':                self.setCode_message_handler,
         }
 
         ##link_strs = ['192.168.0.11:7788', 'u:192.168.0.11:7788']
@@ -349,6 +353,13 @@ class Ui_MainWindow(object):
         self.dataBrowserTab.addTab(data_Browser, data_Browser.head_str)
         data_Browser.start_link()
 
+    def setCode_message_handler(self, msg_type, msg_data):
+        if msg_type: pass
+        tabWidget = self.dataBrowserTab.currentWidget()
+        if tabWidget:
+            tabWidget.dataChannelcode = msg_data
+            self.statusBar_code.setText(tabWidget.dataChannelcode.upper())
+
     def get_toolbar_display_mode(self):
         display_mode = ''
         if self.display_mode_H.isChecked(): display_mode += 'H'
@@ -375,6 +386,7 @@ class Ui_MainWindow(object):
         if not tabWidget:
             self.statusBar_connect_status.setText('')
             self.statusBar_rs_count.setText('')
+            self.statusBar_code.setText('')
             if self.data_sending:
                 self.pushbutton_send.setText(u'发送')
                 self.data_sending = False
@@ -392,6 +404,7 @@ class Ui_MainWindow(object):
         self.statusBar_connect_status.setText(tabWidget.get_status())
         counts_str = u'接收: %-8d 发送: %-8d' % (tabWidget.recv_counts, tabWidget.send_counts)
         self.statusBar_rs_count.setText(counts_str)
+        self.statusBar_code.setText(tabWidget.dataChannelcode.upper())
 
     @QtCore.pyqtSlot()
     def MainWindow_message_handler(self, msg_type, msg_data):

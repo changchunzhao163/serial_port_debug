@@ -78,7 +78,10 @@ class commandBrowser(QtGui.QPlainTextEdit):
         for data in data_split:
             if len(data) == 0 or data[0:1] == '#': continue
             mix_command = data.split(':')[0].upper()
-            if mix_command == 'F' or mix_command in dataBrowser.mode_str_to_mode: continue
+            if mix_command == 'F' \
+                    or mix_command == 'CODE'\
+                    or mix_command in dataBrowser.mode_str_to_mode:
+                continue
             if mix_command not in ['M', 'S', 'LOOP']:
                 data = data + '\r\n'
             elif mix_command == 'LOOP':
@@ -131,6 +134,9 @@ class commandBrowser(QtGui.QPlainTextEdit):
                 elif mix_command == 'F':
                     msg_type = 'newCommandTab'
                     msg_data = selectLine[2:]
+                elif mix_command == 'CODE':
+                    msg_type = 'setCode'
+                    msg_data = selectLine[5:]
                 elif mix_command in dataBrowser.mode_str_to_mode \
                         and mix_command != 'AT' and mix_command != 'AU':
                     msg_type = 'newDataBrowserTab'

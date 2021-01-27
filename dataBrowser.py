@@ -179,6 +179,7 @@ class DataChannel(object):
         self.ip_str = parent_dataBrowser.ip_str
         self.port_str = parent_dataBrowser.port_str
         self.signal_msg = parent_dataBrowser.signal_msg
+        ##self.dataChannelcode = parent_dataBrowser.dataChannelcode
         ##self.paser_mix_data = parent_dataBrowser.paser_mix_data
         self.send_queue_cache = collections.deque()
         self.send_thread_queue = Queue.Queue(200)
@@ -211,6 +212,7 @@ class DataChannel(object):
         pass
 
     def paser_mix_data(self, data):
+        data = data.decode(self.parent.dataChannelcode, 'ignore')
         data_split = data.split(':')
         mix_command = data_split[0].upper()
 
@@ -218,11 +220,15 @@ class DataChannel(object):
             if self.loop_start_flag:
                 self.loop_start_flag = False
                 if len(self.send_loop_queue_cache) > 0 and self.loop_count != 0:
-                    self.send_queue_cache.appendleft(('sendMixData', 'LOOP:END'))
+                    temp_data = 'LOOP:END'
+                    temp_data = temp_data.encode(self.parent.dataChannelcode, 'ignore')
+                    self.send_queue_cache.appendleft(('sendMixData', temp_data))
                     while len(self.send_loop_queue_cache) > 0:
                         req_data = self.send_loop_queue_cache.pop()
                         self.send_queue_cache.appendleft(('sendMixData', req_data))
-                    self.send_queue_cache.appendleft(('sendMixData', 'LOOP:%d' % self.loop_count))
+                    temp_data = 'LOOP:%d' % self.loop_count
+                    temp_data = temp_data.encode(self.parent.dataChannelcode, 'ignore')
+                    self.send_queue_cache.appendleft(('sendMixData', temp_data))
                 else:
                     self.send_loop_queue_cache.clear()
             else:
@@ -238,7 +244,7 @@ class DataChannel(object):
                 self.loop_count -= 1
             return ''
         if self.loop_start_flag:
-            self.send_loop_queue_cache.append(data)
+            self.send_loop_queue_cache.append(data.encode(self.parent.dataChannelcode, 'ignore'))
 
         if 'S' == mix_command:
             delay = float(data[2:])
@@ -246,7 +252,8 @@ class DataChannel(object):
             return ''
         elif 'M' == mix_command:
             data = data[2:]
-        bytes_data = bytes(data)
+        ##bytes_data = bytes(data)
+        bytes_data = data
         ##print 'paser_mix_data', bytes_data##
         return_data = ''
         while True:
@@ -254,7 +261,7 @@ class DataChannel(object):
             if start_index == -1: break
             end_index = bytes_data.find(']')
             if end_index == -1: break
-            return_data += bytes_data[0:start_index]
+            return_data += bytes_data[0:start_index].encode(self.parent.dataChannelcode, 'ignore')
             hex_str = bytes_data[start_index + 1:end_index]
             ##print 'hex_str', hex_str
             if len(bytes_data) > (end_index + 1):
@@ -263,6 +270,7 @@ class DataChannel(object):
                 bytes_data = ''
             if not hex_str: continue
             hex_str_split = hex_str.split(' ')
+            ##print hex_str_split
             for h in hex_str_split:
                 if h.upper() == 'CRC16':
                     return_data += binascii.a2b_hex(crc16_c(return_data))
@@ -273,7 +281,7 @@ class DataChannel(object):
                     self.signal_msg.emit('statusBarFlashText', u'输入格式错误')
                     return ''
                 return_data += binascii.a2b_hex(h)
-        return_data += bytes_data
+        return_data += bytes_data.encode(self.parent.dataChannelcode, 'ignore')
         return return_data
 
     def send_data(self, data_type, data):
@@ -281,6 +289,7 @@ class DataChannel(object):
         if self.mode == 'tcp listen' or self.mode == 'udp listen':
             if self.status != 'Listen': return False
         elif self.status != 'Connect': return False
+        data = data.encode(self.parent.dataChannelcode, 'ignore')
         self.send_thread_queue.put_nowait((data_type, data))
         return True
 
@@ -769,6 +778,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         self.dataChannel = None
         self.setReadOnly(True)
         self.setMinimumWidth(600)
+        self.dataChannelcode = 'gbk'
 
         self.mode, self.ip_str, self.port_str, self.display_mode, self.singleTab = self.paser_linkStr(linkStr)
         print self.mode, self.ip_str, self.port_str, self.display_mode
@@ -905,7 +915,8 @@ class dataBrowser(QtGui.QPlainTextEdit):
             bytes_data = bytes(data)
             for b in bytes_data:
                 disp_str += '%02X ' % ord(b)
-        else: disp_str += data
+        else:
+            disp_str += data.decode(self.dataChannelcode, 'ignore')
 
         return disp_str
 
