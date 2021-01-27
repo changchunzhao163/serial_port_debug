@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from PyQt4 import QtCore, QtGui
 import dataBrowser
 
@@ -24,6 +26,68 @@ class commandBrowser(QtGui.QPlainTextEdit):
         except:
             val = ''
         self.setPlainText(val)
+        self.createContextMenu()
+        self.text_changed = False
+        self.textChanged.connect(self.text_changed_handler)
+
+    def createContextMenu(self) :
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.showContextMenu)
+        ##self.contextMenu = QtGui.QMenu(self)
+        ##self.copy_Action = self.contextMenu.addAction('&Copy     Ctrl+C')
+        ##self.copy_Action.triggered.connect(self.copy)
+        ##self.paste_Action = self.contextMenu.addAction('&Paste    Ctrl+V')
+        ##self.paste_Action.triggered.connect(self.paste)
+
+    def showContextMenu(self, pos):
+        if pos: pass
+
+        self.contextMenu = QtGui.QMenu(self)
+
+        self.copy_Action = self.contextMenu.addAction('&Copy      Ctrl+C')
+        self.copy_Action.triggered.connect(self.copy)
+        self.paste_Action = self.contextMenu.addAction('&Paste     Ctrl+V')
+        self.paste_Action.triggered.connect(self.paste)
+        self.contextMenu.addAction('').setSeparator(True)
+
+        if len(self.textCursor().selectedText()) > 0:
+            self.send_selected_Action = self.contextMenu.addAction(u'发送选中内容')
+            self.send_selected_Action.triggered.connect(self.send_selected_handler)
+        else:
+            self.send_line_Action = self.contextMenu.addAction(u'发送当前行')
+            self.send_line_Action.triggered.connect(self.doubleClick_line)
+
+        self.contextMenu.move(self.cursor().pos())
+        self.contextMenu.show()
+
+    @QtCore.pyqtSlot()
+    def text_changed_handler(self):
+        if not self.text_changed:
+            i = self.parent.indexOf(self)
+            self.parent.setTabText(i, '*' + self.file_name)
+        self.text_changed = True
+
+    @QtCore.pyqtSlot()
+    def send_selected_handler(self):
+        ##selectedText = unicode(self.textCursor().selectedText()).encode('utf-8')
+        ##selectedText = unicode(self.textCursor().selectedText(), 'utf-8', 'ignore')
+        selectedText = unicode(self.textCursor().selectedText())
+        data_split = selectedText.split(u'\u2029')  # u'\u2029'段落分割符
+        send_loop_end = False
+        msg_type = 'sendMixData'
+        for data in data_split:
+            if len(data) == 0 or data[0:1] == '#': continue
+            mix_command = data.split(':')[0].upper()
+            if mix_command == 'F' or mix_command in dataBrowser.mode_str_to_mode: continue
+            if mix_command not in ['M', 'S', 'LOOP']:
+                data = data + '\r\n'
+            elif mix_command == 'LOOP':
+                send_loop_end = not send_loop_end
+            msg_data = data
+            ##print selectedText
+            self.signal_msg.emit(msg_type, msg_data)
+        if send_loop_end:
+            self.signal_msg.emit(msg_type, 'LOOP:END')
 
     @QtCore.pyqtSlot()
     def highligtCurrentLine(self):
@@ -39,6 +103,9 @@ class commandBrowser(QtGui.QPlainTextEdit):
 
     @QtCore.pyqtSlot()
     def save_shortcut_activated(self):
+        if not self.text_changed: return
+        self.text_changed = False
+        self.parent.setTabText(self.parent.indexOf(self), self.file_name)
         with open(self.file_name, 'wb') as fd:
             val = unicode(self.toPlainText()).encode('gbk').replace('\n', '\r\n')
             ##print val
@@ -46,9 +113,10 @@ class commandBrowser(QtGui.QPlainTextEdit):
 
     def doubleClick_line(self):
         cursor = self.textCursor()
-        lineNumber = cursor.blockNumber()
+        blockNumber = cursor.blockNumber()
         textDocument = self.document()
-        textBlock = textDocument.findBlockByLineNumber(lineNumber)
+        ##textBlock = textDocument.findBlockByLineNumber(lineNumber)
+        textBlock = textDocument.findBlockByNumber(blockNumber)
         try:
             selectLine = unicode(textBlock.text())
             if len(selectLine) == 0: return

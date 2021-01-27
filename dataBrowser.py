@@ -768,6 +768,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         self.signal_msg = self.MainWindow.MainWindow_message.signal_msg
         self.dataChannel = None
         self.setReadOnly(True)
+        self.setMinimumWidth(600)
 
         self.mode, self.ip_str, self.port_str, self.display_mode, self.singleTab = self.paser_linkStr(linkStr)
         print self.mode, self.ip_str, self.port_str, self.display_mode
@@ -784,6 +785,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         elif self.mode == 'udp listen':
             self.dataChannel = udpListenDataChannel(self)
         if 'L' in self.display_mode: self.start_log()
+        self.set_display_Wrap_mode()
 
         self.cursorPositionChanged.connect(self.highligtCurrentLine)
 
@@ -881,7 +883,9 @@ class dataBrowser(QtGui.QPlainTextEdit):
             else:
                 disp_str += '[%s] SEND: %d bytes\n' % (time_str, len(data))
         if 'H' in self.display_mode and 'C' in self.display_mode:
-            bytes_data = bytes(data)
+            ##bytes_data = bytes(data)
+            ##bytes_data = data.encode('utf-8')
+            bytes_data = data
             str_data = ''
             i = 0
             for b in bytes_data:
@@ -1019,3 +1023,11 @@ class dataBrowser(QtGui.QPlainTextEdit):
                     display_mode += 'E'
         self.display_mode = display_mode
         self.signal_msg.emit('statusChange', self)
+        self.set_display_Wrap_mode()
+
+    def set_display_Wrap_mode(self):
+        ##pass
+        if 'C' in self.display_mode and 'H' in self.display_mode:
+            self.setLineWrapMode(QtGui.QPlainTextEdit.NoWrap)
+        else:
+            self.setLineWrapMode(QtGui.QPlainTextEdit.WidgetWidth)

@@ -17,9 +17,13 @@ class myQMainWindow(QtGui.QMainWindow):
         main_window_msg.emit('closeEvent', ())
         event.accept()
 
+
 def main() :
     global main_window_msg
 
+    print sys.getdefaultencoding()
+    ##reload(sys)
+    ##sys.setdefaultencoding('utf8')
     app=QtGui.QApplication(sys.argv)
     ##MainWindow = QtGui.QMainWindow()
     MainWindow = myQMainWindow()
