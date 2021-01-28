@@ -284,16 +284,17 @@ class DataChannel(object):
                 return ''
             elif 'SF' == mix_command:
                 self.send_file_interval = 0.01
+                file_name_offset = 3
                 if len(data_split) > 2:
                     try:
                         self.send_file_interval = float(data_split[1])
                         if self.send_file_interval < 0:
                             self.send_file_interval = 0.01
-                        file_name = data[3 + len(data_split[1]) + 1:]
+                        file_name_offset = 3 + len(data_split[1]) + 1
                     except:
-                        file_name = data[3:]
-                else:
-                    file_name = data[3:]
+                        if len(data_split[1]) == 0:
+                            file_name_offset = 4
+                file_name = data[file_name_offset:]
                 if len(file_name) > 0:
                     self.send_queue_cache.appendleft(('SENDFILE', file_name))
                 return ''

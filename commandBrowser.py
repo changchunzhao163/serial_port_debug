@@ -3,6 +3,14 @@
 from PyQt4 import QtCore, QtGui
 import dataBrowser
 
+data_command_head = ['M', 'S', 'LOOP', 'SF']
+
+def get_command_from_data(data):
+    data_split = data.split(':')
+    if len(data_split) > 1 and (len(data_split[1]) > 0 or len(data_split) > 2):
+        return data_split[0].upper()
+    return ''
+
 
 class commandBrowser(QtGui.QPlainTextEdit):
     def __init__(self, parent=None, MainWindow=None, main_module=None, file_name=None):
@@ -72,17 +80,17 @@ class commandBrowser(QtGui.QPlainTextEdit):
         ##selectedText = unicode(self.textCursor().selectedText()).encode('utf-8')
         ##selectedText = unicode(self.textCursor().selectedText(), 'utf-8', 'ignore')
         selectedText = unicode(self.textCursor().selectedText())
-        data_split = selectedText.split(u'\u2029')  # u'\u2029'段落分割符
+        selectedText_split = selectedText.split(u'\u2029')  # u'\u2029'段落分割符
         send_loop_end = False
         msg_type = 'sendMixData'
-        for data in data_split:
+        for data in selectedText_split:
             if len(data) == 0 or data[0:1] == '#': continue
-            mix_command = data.split(':')[0].upper()
+            mix_command = get_command_from_data(data)
             if mix_command == 'F' \
                     or mix_command == 'CODE'\
                     or mix_command in dataBrowser.mode_str_to_mode:
                 continue
-            if mix_command not in ['M', 'S', 'LOOP']:
+            if mix_command not in data_command_head:
                 data = data + '\r\n'
             elif mix_command == 'LOOP':
                 send_loop_end = not send_loop_end
@@ -126,9 +134,9 @@ class commandBrowser(QtGui.QPlainTextEdit):
             if selectLine[0:1] == '#': return
             msg_type = 'sendPlainData'
             msg_data = selectLine + '\r\n'
-            if len(selectLine) > 2:
-                mix_command = selectLine.split(':')[0].upper()
-                if mix_command in ['M', 'S', 'LOOP']:
+            mix_command = get_command_from_data(selectLine)
+            if mix_command != '':
+                if mix_command in data_command_head:
                     msg_type = 'sendMixData'
                     msg_data = selectLine
                 elif mix_command == 'F':
