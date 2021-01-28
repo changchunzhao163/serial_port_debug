@@ -1,6 +1,11 @@
 *.pyc
 *.txt
 log_*
+*.log
 .idea/
 resource/Thumbs.db
-resource/connection.png
+setup.py
+make_exe.bat
+deployer/
+build/
+dist/

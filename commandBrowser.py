@@ -28,14 +28,17 @@ class commandBrowser(QtGui.QPlainTextEdit):
 
         self.signal_msg = self.MainWindow.MainWindow_message.signal_msg
         self.cursorPositionChanged.connect(self.highligtCurrentLine)
+        self.createContextMenu()
+        self.text_changed = False
         try:
             with open(self.file_name, 'rb') as fd:
                 val = fd.read().decode('gbk').replace('\r\n', '\n')
         except:
             val = ''
+            if self.file_name == 'commands.txt':
+                val = 'HELP::'
+                self.text_changed = True
         self.setPlainText(val)
-        self.createContextMenu()
-        self.text_changed = False
         self.textChanged.connect(self.text_changed_handler)
 
     def createContextMenu(self) :

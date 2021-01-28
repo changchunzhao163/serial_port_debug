@@ -84,6 +84,7 @@ mode_str_to_mode = {
     'TL': 'tcp listen',
     'UL': 'udp listen',
     'C': 'com',
+    'HELP': 'help',
 }
 
 uart_bytesize_set = {
@@ -846,6 +847,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         self.mode, self.ip_str, self.port_str, self.display_mode, self.singleTab = self.paser_linkStr(linkStr)
         print self.mode, self.ip_str, self.port_str, self.display_mode
         self.head_str = self.genarate_head_str()
+        self.set_display_Wrap_mode()
 
         if self.mode == 'tcp client' or self.mode == 'udp client' or self.mode == 'com':
             self.dataChannel = clientPortDataChannel(self)
@@ -857,8 +859,14 @@ class dataBrowser(QtGui.QPlainTextEdit):
             self.dataChannel = udpAcceptedDataChannel(self, remote_socket, remote_address, listen_DataBrowser)
         elif self.mode == 'udp listen':
             self.dataChannel = udpListenDataChannel(self)
+        elif self.mode == 'help':
+            try:
+                with open('README.md', 'r') as fd:
+                    val = fd.read().decode('utf-8')
+            except:
+                val = ''
+            self.setPlainText(val)
         if 'L' in self.display_mode: self.start_log()
-        self.set_display_Wrap_mode()
 
         self.cursorPositionChanged.connect(self.highligtCurrentLine)
 
@@ -889,6 +897,10 @@ class dataBrowser(QtGui.QPlainTextEdit):
         if linkStr_split[0].upper() in mode_str_to_mode:
             mode = mode_str_to_mode[linkStr_split[0].upper()]
             del linkStr_split[0]
+        if mode == 'help':
+            ip_str = ''
+            port_str = ''
+            return mode, ip_str, port_str, display_mode, singleTab
         if len(linkStr_split[0].split('.')) != 4:
             mode = 'com'
             port_str = '810'
@@ -984,6 +996,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         return disp_str
 
     def msg_handler(self, msq_type, msq_data):
+        if self.mode == 'help': return
         if msq_type == 'dataChannelMsg':
             self.dataChannel.local_msg_handler(msq_data)
             return
@@ -1055,6 +1068,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         return self.dataChannel.status
 
     def display_clear(self):
+        if self.mode == 'help': return
         self.setPlainText('')
         self.last_new_line = 2
 
@@ -1064,6 +1078,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         self.signal_msg.emit('statusChange', self)
 
     def start_log(self):
+        if self.mode == 'help': return
         log_name = 'log_' + self.ip_str + '_' + self.port_str + '_' \
                    + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.log'
         try:

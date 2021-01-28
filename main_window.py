@@ -71,7 +71,10 @@ class Ui_MainWindow(object):
 
         MainWindow.setObjectName(_fromUtf8("MainWindow"))
         MainWindow.resize(1024, 800)
-        MainWindow.setWindowIcon(QtGui.QIcon('./resource/SerialPort48.ico'))
+        MainWindow.setWindowIcon(QtGui.QIcon('./resource/SerialPort24.png'))
+        ##icon = QtGui.QIcon()
+        ##icon.addPixmap(QtGui.QPixmap('./resource/link-one.png'), QtGui.QIcon.Normal, QtGui.QIcon.On)
+        ##MainWindow.setWindowIcon(icon)
         self.centralwidget = QtGui.QWidget(MainWindow)
         self.centralwidget.setEnabled(True)
 
@@ -398,11 +401,12 @@ class Ui_MainWindow(object):
                 self.data_sending = False
             return
 
-        if self.data_sending and not tabWidget.dataChannel.data_sending:
-            self.pushbutton_send.setText(u'发送')
-        elif tabWidget.dataChannel.data_sending and not self.data_sending:
-            self.pushbutton_send.setText(u'停止发送')
-        self.data_sending = tabWidget.dataChannel.data_sending
+        if tabWidget.dataChannel:
+            if self.data_sending and not tabWidget.dataChannel.data_sending:
+                self.pushbutton_send.setText(u'发送')
+            elif tabWidget.dataChannel.data_sending and not self.data_sending:
+                self.pushbutton_send.setText(u'停止发送')
+            self.data_sending = tabWidget.dataChannel.data_sending
 
         if self.get_toolbar_display_mode() != tabWidget.display_mode:
             self.set_toolbar_display_mode(tabWidget.display_mode)

@@ -1,3 +1,5 @@
+https://github.com/changchunzhao163/serial_port_debug
+
 ### pyqt4 + python2.7.18 串行数据调试器
 
 #### 可实现功能
@@ -85,4 +87,7 @@
     CODE:编码方式
     设置数据通道的编码方式，默认GBK
     可以设置为：ASCII, GBK, UTF-8, UTF-16LE, UTF-16BE, ....
-    
+
+    HELP::
+    打开帮助页
+
