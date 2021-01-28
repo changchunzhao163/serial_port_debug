@@ -189,6 +189,10 @@ class DataChannel(object):
         self.send_loop_queue_cache = collections.deque()
         self.loop_start_flag = False
         self.loop_count = 16
+        self.send_file_handler = None
+        self.send_file_name = ''
+        self.send_file_count = 0
+        self.send_file_interval = 0.01
 
     def start_link(self):
         if not self.send_thread_running:
@@ -211,12 +215,38 @@ class DataChannel(object):
     def local_msg_handler(self, msg):
         pass
 
+    def get_file_data(self, file_name):
+        if self.send_file_handler is None:
+            ##file_name = file_name.decode(self.parent.dataChannelcode, 'ignore')
+            try:
+                self.send_file_handler = open(file_name, 'rb')
+                self.send_file_count = 0
+                self.send_file_name = file_name
+                self.signal_msg.emit('newLineText', (self.parent, 'send %s start.' % file_name))
+            except Exception as e:
+                print e
+                self.send_file_handler = None
+                self.signal_msg.emit('newLineText', (self.parent, 'open %s error.' % file_name))
+                return ''
+
+        data = self.send_file_handler.read(1024)
+        if data:
+            self.send_file_count += len(data)
+            self.send_queue_cache.appendleft(('SENDFILE', file_name))
+        else:
+            temp_str = 'send %s end, total %d bytes.' % (file_name, self.send_file_count)
+            self.signal_msg.emit('newLineText', (self.parent, temp_str))
+            self.send_file_handler.close()
+            self.send_file_handler = None
+            self.send_file_count = 0
+        return data
+
     def paser_mix_data(self, data):
         data = data.decode(self.parent.dataChannelcode, 'ignore')
         data_split = data.split(':')
         mix_command = data_split[0].upper()
 
-        if 'LOOP' == mix_command:
+        if 'LOOP' == mix_command and ':' in data:
             if self.loop_start_flag:
                 self.loop_start_flag = False
                 if len(self.send_loop_queue_cache) > 0 and self.loop_count != 0:
@@ -243,15 +273,32 @@ class DataChannel(object):
                         except: self.loop_count = 16
                 self.loop_count -= 1
             return ''
-        if self.loop_start_flag:
-            self.send_loop_queue_cache.append(data.encode(self.parent.dataChannelcode, 'ignore'))
 
-        if 'S' == mix_command:
-            delay = float(data[2:])
-            self.send_queue_cache.appendleft(('SLEEP', delay))
-            return ''
-        elif 'M' == mix_command:
-            data = data[2:]
+        if self.loop_start_flag:
+                self.send_loop_queue_cache.append(data.encode(self.parent.dataChannelcode, 'ignore'))
+
+        if len(data_split) > 1:
+            if 'S' == mix_command:
+                delay = float(data_split[1])
+                self.send_queue_cache.appendleft(('SLEEP', delay))
+                return ''
+            elif 'SF' == mix_command:
+                self.send_file_interval = 0.01
+                if len(data_split) > 2:
+                    try:
+                        self.send_file_interval = float(data_split[1])
+                        if self.send_file_interval < 0:
+                            self.send_file_interval = 0.01
+                        file_name = data[3 + len(data_split[1]) + 1:]
+                    except:
+                        file_name = data[3:]
+                else:
+                    file_name = data[3:]
+                if len(file_name) > 0:
+                    self.send_queue_cache.appendleft(('SENDFILE', file_name))
+                return ''
+            elif 'M' == mix_command:
+                data = data[2:]
         ##bytes_data = bytes(data)
         bytes_data = data
         ##print 'paser_mix_data', bytes_data##
@@ -312,6 +359,8 @@ class DataChannel(object):
                 if sleep_timeout <= 0:
                     sleep_timeout = 0
                     sleep_timeout_timestamp = None
+            elif self.send_file_handler is not None:
+                sleep_timeout = self.send_file_interval
             else:
                 sleep_timeout = None
                 if self.data_sending \
@@ -327,6 +376,10 @@ class DataChannel(object):
                     print 'send_thread EXIT'
                     while not self.send_thread_queue.empty():
                         self.send_thread_queue.get(False)
+                    if self.send_file_handler is not None:
+                        try: self.send_file_handler.close()
+                        except: pass
+                        self.send_file_handler = None
                     return
                 elif req == 'STOP':
                     print 'send_thread STOP'
@@ -338,6 +391,12 @@ class DataChannel(object):
                     self.send_queue_cache.clear()
                     self.send_loop_queue_cache.clear()
                     self.loop_start_flag = False
+                    if self.send_file_handler is not None:
+                        try: self.send_file_handler.close()
+                        except: pass
+                        self.send_file_handler = None
+                        temp_str = 'send %s canceled, sent %d bytes.' % (self.send_file_name, self.send_file_count)
+                        self.signal_msg.emit('newLineText', (self.parent, temp_str))
                     if exit_flag: return
                     continue
                 if self.socekt is None: continue
@@ -363,17 +422,20 @@ class DataChannel(object):
                     break
                 elif req == 'sendPlainData':
                     pass
+                elif req == 'SENDFILE':
+                    req_data = self.get_file_data(req_data)
                 else:
                     req_data = self.paser_mix_data(req_data)
                 datetimestamp = datetime.datetime.now()
                 timestamp = timestamp_from_bootime(datetimestamp)
                 ##print 'timestamp', timestamp, datetimestamp.microsecond
                 if req_data and self.send_data_to_channel(req_data):
-                    if 'E' in self.parent.display_mode:
+                    if 'E' in self.parent.display_mode and req != 'SENDFILE':
                         self.signal_msg.emit('appendEchoText', (self.parent, (req_data, datetimestamp)))
                         ##print 'send used time', time.time() - timestamp
                     self.parent.send_counts += len(req_data)
                     self.signal_msg.emit('statusChange', self.parent)
+                if req == 'SENDFILE': break
 
 
 class clientPortDataChannel(DataChannel):
