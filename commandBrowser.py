@@ -13,12 +13,16 @@ def get_command_from_data(data):
 
 
 class commandBrowser(QtGui.QPlainTextEdit):
-    def __init__(self, parent=None, MainWindow=None, main_module=None, file_name=None):
+    def __init__(self, parent=None, MainWindow=None, main_module=None, file_path=None):
         super(commandBrowser, self).__init__(parent)
         self.parent = parent
         self.MainWindow = MainWindow
         self.main_module = main_module
-        self.file_name = file_name
+        self.file_path = file_path
+        if '\\' in file_path: self.file_name = file_path.split('\\')[-1]
+        elif '/' in file_path: self.file_name = file_path.split('/')[-1]
+        else: self.file_name = file_path
+        ##self.file_name = file_name
         self.edit_mode = False
         ##self.setReadOnly(True)
         self.setLineWrapMode(QtGui.QPlainTextEdit.NoWrap)
@@ -30,14 +34,28 @@ class commandBrowser(QtGui.QPlainTextEdit):
         self.cursorPositionChanged.connect(self.highligtCurrentLine)
         self.createContextMenu()
         self.text_changed = False
+        self.org_code = ''
         try:
-            with open(self.file_name, 'rb') as fd:
-                val = fd.read().decode('gbk').replace('\r\n', '\n')
+            with open(self.file_path, 'rb') as fd:
+                file_contents = fd.read()
+                try:
+                    val = file_contents.decode('gbk').replace('\r\n', '\n')
+                    self.org_code = 'gbk'
+                except Exception as e:
+                    print e
+                    try:
+                        val = file_contents.decode('utf-8').replace('\r\n', '\n')
+                        self.org_code = 'utf-8'
+                    except Exception as e:
+                        print e
+                        val = ''
+                        self.signal_msg.emit('statusBarFlashText', u'文件 %s 解码错误' % self.file_name)
         except:
             val = ''
-            if self.file_name == 'commands.txt':
+            self.org_code = 'gbk'
+            if self.file_path == 'commands.txt':
                 val = 'HELP::'
-                self.text_changed = True
+                ##self.text_changed = True
         self.setPlainText(val)
         self.textChanged.connect(self.text_changed_handler)
 
@@ -118,10 +136,11 @@ class commandBrowser(QtGui.QPlainTextEdit):
     @QtCore.pyqtSlot()
     def save_shortcut_activated(self):
         if not self.text_changed: return
+        if not self.org_code: return
         self.text_changed = False
         self.parent.setTabText(self.parent.indexOf(self), self.file_name)
-        with open(self.file_name, 'wb') as fd:
-            val = unicode(self.toPlainText()).encode('gbk').replace('\n', '\r\n')
+        with open(self.file_path, 'wb') as fd:
+            val = unicode(self.toPlainText()).encode(self.org_code).replace('\n', '\r\n')
             ##print val
             fd.write(val)
 

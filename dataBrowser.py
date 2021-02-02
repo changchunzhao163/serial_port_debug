@@ -10,6 +10,8 @@ import Queue
 import collections
 import serial
 import select
+import ssl
+import pprint
 
 dt_boot =  datetime.datetime.now()
 
@@ -78,10 +80,12 @@ def crc16_c(Tar, res=0xFFFF):
 
 mode_str_to_mode = {
     'T': 'tcp client',
+    'SC': 'ssl client',
     'AT': 'tcp accept client',
     'U': 'udp client',
     'AU': 'udp accept client',
     'TL': 'tcp listen',
+    'SL': 'ssl listen',
     'UL': 'udp listen',
     'C': 'com',
     'HELP': 'help',
@@ -144,10 +148,18 @@ class SocketSerial(object):
         data = bytearray()
         try:
             data = self._socket.recv(size)
-            if data == b'': raise Exception('connection failed')
+            if data == b'':
+                print 'SocketSerial read end'
+                raise Exception('connection failed')
         except socket.timeout:
             pass
+        except ssl.SSLError as e:
+            if 'timed out' in str(e):
+                pass
+            else:
+                raise
         except:
+            ##print 'SocketSerial read', type(e), repr(e)
             raise
         return bytes(data)
 
@@ -171,13 +183,16 @@ def timestamp_from_bootime(dt=None):
     ##return time.mktime(delt_dt.timetuple()) + delt_dt.microsecond/1000000.0
     return delt_dt.days * 24 * 60 * 60 + delt_dt.seconds + delt_dt.microseconds/1000000.0
 
+
 class DataChannel(object):
     def __init__(self, parent_dataBrowser=None):
         self.parent = parent_dataBrowser
         self.socekt = None
         self.status = 'Idle'
         self.mode = parent_dataBrowser.mode
-        self.ip_str = parent_dataBrowser.ip_str
+        if self.mode != 'tcp client' and self.mode != 'udp client' and self.mode != 'ssl client':
+            self.ip_str = parent_dataBrowser.host_str
+        self.host_str = parent_dataBrowser.host_str
         self.port_str = parent_dataBrowser.port_str
         self.signal_msg = parent_dataBrowser.signal_msg
         ##self.dataChannelcode = parent_dataBrowser.dataChannelcode
@@ -459,9 +474,22 @@ class clientPortDataChannel(DataChannel):
         except: pass
         self.socekt = None
 
+    def recv_error_end(self, error_str):
+        if self.socekt is not None:
+            try:
+                if self.mode != 'com':
+                    self.socekt.shutdown(socket.SHUT_RDWR)
+            except: pass
+            try: self.socekt.close()
+            except: pass
+        self.socekt = None
+        self.status = 'Idle'
+        if error_str: self.signal_msg.emit('newLineText', (self.parent, error_str))
+        else: self.signal_msg.emit('statusChange', self.parent)
+
     def recv_thread(self):
         try:
-            if self.mode == 'tcp client':
+            if self.mode == 'tcp client' or self.mode == 'ssl client':
                 self.socekt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.socekt.setblocking(False)
             elif self.mode == 'udp client':
@@ -492,61 +520,82 @@ class clientPortDataChannel(DataChannel):
                 self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
                 ##self.signal_msg.emit('statusChange', self.parent)
         except:
-            self.socekt = None
-            self.status = 'Idle'
             if self.mode == 'com': error_str = 'open com error.'
             else: error_str = 'creat socket error.'
-            self.signal_msg.emit('newLineText', (self.parent, error_str))
-            ##self.signal_msg.emit('statusChange', self.parent)
-            print 'creat socket error'
+            self.recv_error_end(error_str)
+            ##print 'creat socket error'
             return
 
-        if self.mode == 'tcp client' or self.mode == 'udp client':
+        if self.mode != 'com':
+            self.ip_str = self.parent.main_module.getHostByName_request(self.host_str)
+            timeout = 0
+            while self.socekt is not None and not self.ip_str and timeout < 10:
+                time.sleep(0.01)
+                timeout += 0.01
+                self.ip_str = self.parent.main_module.getHostByName_result(self.host_str)
+            if self.socekt is None:
+                return
+            if self.ip_str:
+                if self.ip_str != self.host_str:
+                    temp_str = 'dns %s -> %s.' % (self.host_str, self.ip_str)
+                    self.signal_msg.emit('newLineText', (self.parent, temp_str))
+            else:
+                self.recv_error_end('dns %s timeout.' % self.host_str)
+                return
+
+        if self.mode != 'com':
+        ##if self.mode != 'com' and self.mode != 'ssl client':
             while self.socekt is not None:
                 ret = client_connect(self.socekt, (self.ip_str, int(self.port_str)))
                 if ret == 1:
                     print 'connect ok'
                     self.status = 'Connect'
                     self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
-                    ##self.signal_msg.emit('statusChange', self.parent)
                     break
                 elif ret == -1:
                     print 'connect error'
-                    self.signal_msg.emit('newLineText', (self.parent, 'connect failure.'))
-                    ##self.signal_msg.emit('statusChange', self.parent)
-                    try:
-                        if self.mode != 'com':
-                            self.socekt.shutdown(socket.SHUT_RDWR)
-                            self.socekt.close()
-                    except:
-                        pass
-                    self.socekt = None
-                    self.status = 'Idle'
+                    self.recv_error_end('connect failure.')
                     return
                 elif ret == 0:
                     time.sleep(0.01)
-            if self.socekt is not None:
+            if self.socekt is not None and self.mode != 'ssl client':
                 self.socekt = SocketSerial(self.socekt)
+
+        if self.mode == 'ssl client':
+            self.socekt.setblocking(True)
+            self.socekt.settimeout(10)
+            context = ssl.create_default_context()
+            try:
+                conn = context.wrap_socket(self.socekt, server_hostname=self.host_str)
+                ##conn.connect((self.host_str, int(self.port_str)))
+                ##print 'ssl connect ok'
+                ##self.status = 'Connect'
+                ##self.signal_msg.emit('newLineText', (self.parent, 'ssl connect success.'))
+                ##conn.do_handshake()
+                ##time.sleep(1)
+            except Exception as e:
+                print repr(e)
+                self.recv_error_end('ssl connect failure.')
+                return
+            ##cert = conn.getpeercert()
+            ##pprint.pprint(cert)
+            self.socekt = SocketSerial(conn)
 
         while self.socekt is not None:
             try:
                 data = self.socekt.read(2048)
                 if not data: continue
-            except:
+            except Exception as e:
+                print 'socekt.read Exception', repr(e)
                 if self.socekt is not None:
                     print 'peer disconnect'
                     self.signal_msg.emit('newLineText', (self.parent, 'peer disconnect.'))
-                    ##self.signal_msg.emit('statusChange', self.parent)
                 break
             self.signal_msg.emit('appendText', (self.parent, (data, datetime.datetime.now())))
             ##self.recv_counts += len(data)
             ##self.signal_msg.emit('statusChange', self)
 
-        if self.socekt is not None:
-            self.socekt.close()
-        self.socekt = None
-        self.status = 'Idle'
-        self.signal_msg.emit('statusChange', self.parent)
+        self.recv_error_end('')
         ##print 'recv_thread exit'
 
 
@@ -844,12 +893,12 @@ class dataBrowser(QtGui.QPlainTextEdit):
         self.setMinimumWidth(600)
         self.dataChannelcode = 'gbk'
 
-        self.mode, self.ip_str, self.port_str, self.display_mode, self.singleTab = self.paser_linkStr(linkStr)
-        print self.mode, self.ip_str, self.port_str, self.display_mode
+        self.mode, self.host_str, self.port_str, self.display_mode, self.singleTab = self.paser_linkStr(linkStr)
+        print self.mode, self.host_str, self.port_str, self.display_mode
         self.head_str = self.genarate_head_str()
         self.set_display_Wrap_mode()
 
-        if self.mode == 'tcp client' or self.mode == 'udp client' or self.mode == 'com':
+        if self.mode == 'tcp client' or self.mode == 'udp client' or self.mode == 'com' or self.mode == 'ssl client':
             self.dataChannel = clientPortDataChannel(self)
         elif self.mode == 'tcp accept client':
             self.dataChannel = tcpAcceptedDataChannel(self, remote_socket, remote_address, listen_DataBrowser)
@@ -898,15 +947,15 @@ class dataBrowser(QtGui.QPlainTextEdit):
             mode = mode_str_to_mode[linkStr_split[0].upper()]
             del linkStr_split[0]
         if mode == 'help':
-            ip_str = ''
+            host_str = ''
             port_str = ''
-            return mode, ip_str, port_str, display_mode, singleTab
-        if len(linkStr_split[0].split('.')) != 4:
+            return mode, host_str, port_str, display_mode, singleTab
+        if len(linkStr_split[0].split('.')) < 1:
             mode = 'com'
             port_str = '810'
-        ip_str = linkStr_split[0].upper()
+        host_str = linkStr_split[0].upper()
         if mode == 'com' and len(linkStr_split) > 1 and len(linkStr_split[1]) >= 4:
-            ip_str += ':' + linkStr_split[1]
+            host_str += ':' + linkStr_split[1]
             del linkStr_split[1]
         if len(linkStr_split) > 1:
             if len(linkStr_split[1]) > 0: port_str = linkStr_split[1]
@@ -927,12 +976,12 @@ class dataBrowser(QtGui.QPlainTextEdit):
                 if 'E' not in display_mode:
                     display_mode += 'E'
 
-        return mode, ip_str, port_str, display_mode, singleTab
+        return mode, host_str, port_str, display_mode, singleTab
 
     def compare_linkStr(self, linkStr):
-        mode, ip_str, port_str, display_mode, singleTab = self.paser_linkStr(linkStr)
+        mode, host_str, port_str, display_mode, singleTab = self.paser_linkStr(linkStr)
         if mode != self.mode: return False
-        if ip_str != self.ip_str: return False
+        if host_str != self.host_str: return False
         if port_str != self.port_str: return False
         return True
 
@@ -942,7 +991,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
             if v == self.mode:
                 head_str = k
                 break
-        head_str += ':' + self.ip_str
+        head_str += ':' + self.host_str
         if self.mode == 'com' and self.port_str.count(':') == 0:
             head_str += ':115200'
         head_str += ':' + self.port_str
@@ -1117,6 +1166,11 @@ class dataBrowser(QtGui.QPlainTextEdit):
     def set_display_Wrap_mode(self):
         ##pass
         if 'C' in self.display_mode and 'H' in self.display_mode:
-            self.setLineWrapMode(QtGui.QPlainTextEdit.NoWrap)
-        else:
+            ##self.setLineWrapMode(QtGui.QPlainTextEdit.NoWrap)
+            if 'W' in self.display_mode:
+                self.display_mode = self.display_mode.replace('W', '')
+                self.signal_msg.emit('statusChange', self)
+        if 'W' in self.display_mode:
             self.setLineWrapMode(QtGui.QPlainTextEdit.WidgetWidth)
+        else:
+            self.setLineWrapMode(QtGui.QPlainTextEdit.NoWrap)

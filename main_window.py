@@ -208,6 +208,10 @@ class Ui_MainWindow(object):
         self.display_mode_L.setCheckable(True)
         self.display_mode_L.setToolTip('Log')
         self.toolBar.addAction(self.display_mode_L)
+        self.display_mode_W = QtGui.QAction('W', self.toolBar)
+        self.display_mode_W.setCheckable(True)
+        self.display_mode_W.setToolTip('Wrap')
+        self.toolBar.addAction(self.display_mode_W)
 
         self.toolBar.addSeparator()
         self.toolBar.addSeparator()
@@ -243,6 +247,7 @@ class Ui_MainWindow(object):
         self.display_mode_T.triggered.connect(self.display_mode_triggered)
         self.display_mode_E.triggered.connect(self.display_mode_triggered)
         self.display_mode_L.triggered.connect(self.display_mode_triggered)
+        self.display_mode_W.triggered.connect(self.display_mode_triggered)
 
         self.pushbutton_send.clicked.connect(self.pushbutton_send_clicked)
 
@@ -323,11 +328,11 @@ class Ui_MainWindow(object):
         if msg_type: pass
         for i in range(self.commandBrowserTab.count()):
             tabWidget = self.commandBrowserTab.widget(i)
-            if tabWidget.file_name == msg_data:
+            if tabWidget.file_path == msg_data:
                 self.commandBrowserTab.setCurrentIndex(i)
                 return
         command_Browser = commandBrowser.commandBrowser(self.commandBrowserTab, self, self.main_module, msg_data)
-        self.commandBrowserTab.addTab(command_Browser, msg_data)
+        self.commandBrowserTab.addTab(command_Browser, command_Browser.file_name)
         self.commandBrowserTab.setCurrentWidget(command_Browser)
 
     def newDataBrowserTab_message_handler(self, msg_type, msg_data):
@@ -339,9 +344,6 @@ class Ui_MainWindow(object):
                 self.reflash_status_indecate()
                 return
         data_Browser = dataBrowser.dataBrowser(self.dataBrowserTab, self, self.main_module, msg_data)
-        ##display_mode = self.get_toolbar_display_mode()
-        ##if data_Browser.display_mode == 'C' and display_mode != 'C':
-        ##    data_Browser.set_display_mode(display_mode)
         self.dataBrowserTab.addTab(data_Browser, data_Browser.head_str)
         self.dataBrowserTab.setCurrentWidget(data_Browser)
         ##self.reflash_status_indecate()
@@ -376,6 +378,7 @@ class Ui_MainWindow(object):
         if self.display_mode_T.isChecked(): display_mode += 'T'
         if self.display_mode_E.isChecked(): display_mode += 'E'
         if self.display_mode_L.isChecked(): display_mode += 'L'
+        if self.display_mode_W.isChecked(): display_mode += 'W'
         return display_mode
 
     def set_toolbar_display_mode(self, display_mode):
@@ -389,6 +392,8 @@ class Ui_MainWindow(object):
         else: self.display_mode_E.setChecked(False)
         if 'L' in display_mode: self.display_mode_L.setChecked(True)
         else: self.display_mode_L.setChecked(False)
+        if 'W' in display_mode: self.display_mode_W.setChecked(True)
+        else: self.display_mode_W.setChecked(False)
 
     def reflash_status_indecate(self):
         tabWidget = self.dataBrowserTab.currentWidget()

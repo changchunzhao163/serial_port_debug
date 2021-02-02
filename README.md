@@ -6,6 +6,7 @@ https://github.com/changchunzhao163/serial_port_debug
 
     串口连接
     tcp client连接
+    ssl client连接
     udp client连接
     tcp listen
     udp listen
@@ -53,12 +54,15 @@ https://github.com/changchunzhao163/serial_port_debug
     F:文件名
     打开新的预设指令页
 
-    T:IP:端口[:接收数据显示模式]
+    T:IP或域名:端口[:接收数据显示模式]
     tcp client连接
-    接收数据显示模式为'C', 'H', 'T', 'E', 'L'几个字符的组合
-    分别代表：字符串模式，HEX模式，时间标签模式，回显模式，log模式
+    接收数据显示模式为'C', 'H', 'T', 'E', 'L', 'W'几个字符的组合
+    分别代表：字符串模式，HEX模式，时间标签模式，回显模式，log模式，自动换行模式
 
-    U:IP:端口[:接收数据显示模式]
+    SC:IP或域名:端口[:接收数据显示模式]
+    ssl client连接
+
+    U:IP或域名:端口[:接收数据显示模式]
     udp client连接
 
     C:串口名[:波特率[:串口配置[:接收数据显示模式]]]
