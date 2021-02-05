@@ -23,6 +23,15 @@ class myQMainWindow(QtGui.QMainWindow):
         main_window_msg.emit('closeEvent', ())
         event.accept()
 
+    def changeEvent(self, event):
+        ##print 'changeEvent'
+        if event.type() == QtCore.QEvent.WindowStateChange:
+            state = self.windowState()
+            if state == QtCore.Qt.WindowMaximized:
+                main_window_msg.emit('WindowStateChange', 'WindowMaximized')
+            elif state == QtCore.Qt.WindowNoState:
+                main_window_msg.emit('WindowStateChange', 'WindowNoState')
+        event.accept()
 
 def getHostByName_thread(host):
     print 'getHostByName_thread', host

@@ -75,6 +75,8 @@ class Ui_MainWindow(object):
         ##icon = QtGui.QIcon()
         ##icon.addPixmap(QtGui.QPixmap('./resource/link-one.png'), QtGui.QIcon.Normal, QtGui.QIcon.On)
         ##MainWindow.setWindowIcon(icon)
+        self.windowState = 'WindowNoState'
+
         self.centralwidget = QtGui.QWidget(MainWindow)
         self.centralwidget.setEnabled(True)
 
@@ -274,6 +276,7 @@ class Ui_MainWindow(object):
             'remoteDataBrowserTab':   self.remoteDataBrowserTab_message_handler,
             'acceptedDataBrowserTab': self.acceptedDataBrowserTab_message_handler,
             'setCode':                self.setCode_message_handler,
+            'WindowStateChange':      self.WindowStateChange_message_handler,
         }
 
         ##link_strs = ['192.168.0.11:7788', 'u:192.168.0.11:7788']
@@ -370,6 +373,18 @@ class Ui_MainWindow(object):
         if tabWidget:
             tabWidget.dataChannelcode = msg_data
             self.statusBar_code.setText(tabWidget.dataChannelcode.upper())
+
+    def WindowStateChange_message_handler(self, msg_type, msg_data):
+        if msg_type: pass
+        if self.windowState != msg_data:
+            if msg_data == 'WindowMaximized':
+                print 'WindowMaximized'
+                self.windowState = 'WindowMaximized'
+                self.mainSplitter.setSizes([700, 500])
+            elif msg_data == 'WindowNoState':
+                print 'WindowNoState'
+                self.windowState = 'WindowNoState'
+                self.mainSplitter.setSizes([700, 300])
 
     def get_toolbar_display_mode(self):
         display_mode = ''

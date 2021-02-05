@@ -607,6 +607,7 @@ class tcpAcceptedDataChannel(DataChannel):
         self.remote_address = remote_address
         self.listen_dataBrowser = listen_dataBrowser
         self.socekt = SocketSerial(remote_socket)
+        self.parent.dataChannelcode = listen_dataBrowser.dataChannelcode
 
     def start_link(self):
         if self.socekt is None: return
@@ -753,6 +754,7 @@ class udpAcceptedDataChannel(DataChannel):
         self.remote_address = remote_address
         self.listen_dataBrowser = listen_dataBrowser
         self.socekt = remote_socket
+        self.parent.dataChannelcode = listen_dataBrowser.dataChannelcode
 
     def start_link(self):
         if self.socekt is None: return
@@ -941,16 +943,19 @@ class dataBrowser(QtGui.QPlainTextEdit):
         mode = 'tcp client'
         ##display_mode = 'C'  # 'HCTEL'
         display_mode = self.MainWindow.get_toolbar_display_mode()
+        custom_display_mode = ''
         port_str = '65500'
         singleTab = False
         if linkStr_split[0].upper() in mode_str_to_mode:
             mode = mode_str_to_mode[linkStr_split[0].upper()]
+            if mode == 'com': port_str = '810'
             del linkStr_split[0]
         if mode == 'help':
             host_str = ''
             port_str = ''
             return mode, host_str, port_str, display_mode, singleTab
-        if len(linkStr_split[0].split('.')) < 1:
+        split_count = len(linkStr_split[0].split('.'))
+        if mode != 'com' and (split_count == 1 or ( split_count == 2 and '\\.' in linkStr_split[0])):
             mode = 'com'
             port_str = '810'
         host_str = linkStr_split[0].upper()
@@ -960,21 +965,22 @@ class dataBrowser(QtGui.QPlainTextEdit):
         if len(linkStr_split) > 1:
             if len(linkStr_split[1]) > 0: port_str = linkStr_split[1]
         if len(linkStr_split) > 2:
-            if len(linkStr_split[2]) > 0: display_mode = linkStr_split[2]
+            if len(linkStr_split[2]) > 0: custom_display_mode = linkStr_split[2]
         if len(linkStr_split) > 3:
             if mode == 'tcp listen' or mode == 'udp listen':
                 if linkStr_split[3].upper() == 'S':
                     singleTab = True
-        display_mode = display_mode.upper()
         if mode == 'tcp listen' or mode == 'udp listen':
-            if display_mode == 'S':
+            if custom_display_mode == 'S':
                 singleTab = True
+                custom_display_mode = ''
                 display_mode = self.MainWindow.get_toolbar_display_mode()
-            if singleTab:
-                if 'T' not in display_mode:
-                    display_mode += 'T'
-                if 'E' not in display_mode:
-                    display_mode += 'E'
+            if singleTab and custom_display_mode == '':
+                custom_display_mode = 'CTE'
+        if custom_display_mode != '':
+            if 'C' not in custom_display_mode and 'H' not in custom_display_mode:
+                custom_display_mode += 'C'
+            display_mode = custom_display_mode.upper()
 
         return mode, host_str, port_str, display_mode, singleTab
 
@@ -1153,12 +1159,12 @@ class dataBrowser(QtGui.QPlainTextEdit):
             self.log_handler = None
         if 'L' in display_mode and not self.log_handler:
             self.start_log()
-        if self.mode == 'tcp listen' or self.mode == 'udp listen':
-            if self.singleTab:
-                if 'T' not in display_mode:
-                    display_mode += 'T'
-                if 'E' not in display_mode:
-                    display_mode += 'E'
+        ##if self.mode == 'tcp listen' or self.mode == 'udp listen':
+        ##    if self.singleTab:
+        ##        if 'T' not in display_mode:
+        ##            display_mode += 'T'
+        ##        if 'E' not in display_mode:
+        ##            display_mode += 'E'
         self.display_mode = display_mode
         self.signal_msg.emit('statusChange', self)
         self.set_display_Wrap_mode()
