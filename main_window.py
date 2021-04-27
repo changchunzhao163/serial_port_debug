@@ -227,9 +227,9 @@ class Ui_MainWindow(object):
 
         self.toolBar.addSeparator()
         self.toolBar.addSeparator()
-        self.commandBrowser_edit_mode = QtGui.QAction('Edit', self.toolBar)
-        self.commandBrowser_edit_mode.setCheckable(True)
-        self.toolBar.addAction(self.commandBrowser_edit_mode)
+        self.commandBrowser_save = QtGui.QAction('Save', self.toolBar)
+        ##self.commandBrowser_edit_mode.setCheckable(True)
+        self.toolBar.addAction(self.commandBrowser_save)
 
         self.MainWindow_message.signal_msg.connect(self.MainWindow_message_handler)
 
@@ -256,7 +256,7 @@ class Ui_MainWindow(object):
         self.display_clear.triggered.connect(self.display_clear_triggered)
         self.counter_reset.triggered.connect(self.counter_reset_triggered)
 
-        self.commandBrowser_edit_mode.triggered.connect(self.edit_mode_triggered)
+        self.commandBrowser_save.triggered.connect(self.commandBrowser_save_triggered)
 
         self.message_handler_switch = {
             'appendText':             self.tabWidget_message_handler,
@@ -462,8 +462,8 @@ class Ui_MainWindow(object):
     @QtCore.pyqtSlot()
     def commandBrowserTab_currentChanged(self, index):
         print 'commandBrowserTab_currentChanged', index
-        tabWidget = self.commandBrowserTab.widget(index)
-        self.commandBrowser_edit_mode.setChecked(tabWidget.edit_mode)
+        ##tabWidget = self.commandBrowserTab.widget(index)
+        ##self.commandBrowser_save.setChecked(tabWidget.edit_mode)
 
     @QtCore.pyqtSlot()
     def commandBrowserTab_CloseRequested(self, index):
@@ -542,10 +542,10 @@ class Ui_MainWindow(object):
     @QtCore.pyqtSlot()
     def counter_reset_triggered(self):
         self.MainWindow_message.signal_msg.emit('counterReset', None)
-
-
+##
     @QtCore.pyqtSlot()
-    def edit_mode_triggered(self):
+    def commandBrowser_save_triggered(self):
         tabWidget = self.commandBrowserTab.currentWidget()
         if tabWidget:
-            tabWidget.set_edit_mode(self.commandBrowser_edit_mode.isChecked())
+            ##tabWidget.set_edit_mode(self.commandBrowser_save.isChecked())
+            tabWidget.save_shortcut_activated()

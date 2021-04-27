@@ -477,8 +477,7 @@ class clientPortDataChannel(DataChannel):
     def recv_error_end(self, error_str):
         if self.socekt is not None:
             try:
-                if self.mode != 'com':
-                    self.socekt.shutdown(socket.SHUT_RDWR)
+                self.socekt.shutdown(socket.SHUT_RDWR)
             except: pass
             try: self.socekt.close()
             except: pass
@@ -495,71 +494,45 @@ class clientPortDataChannel(DataChannel):
             elif self.mode == 'udp client':
                 self.socekt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 self.socekt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            elif self.mode == 'com':
-                print self.ip_str, self.port_str
-                ip_str_split = self.ip_str.split(':')
-                port_set = ip_str_split[0]
-                UART_set = self.port_str
-                baudrate_set = 115200
-                if len(ip_str_split) > 1:
-                    try: baudrate_set = int(ip_str_split[1])
-                    except: pass
-                bytesize_set = uart_bytesize_set.get(UART_set[0], serial.EIGHTBITS)
-                stopbits_set = uart_stopbits_set.get(UART_set[1], serial.STOPBITS_ONE)
-                parity_set = uart_parity_set.get(UART_set[2], serial.PARITY_NONE)
-                self.socekt = serial.Serial(
-                    port=port_set,
-                    baudrate=baudrate_set,
-                    bytesize=bytesize_set,
-                    parity=parity_set,
-                    stopbits=stopbits_set,
-                    timeout=0.001,
-                    writeTimeout=0.1)
-                print 'connect ok'
-                self.status = 'Connect'
-                self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
-                ##self.signal_msg.emit('statusChange', self.parent)
         except:
-            if self.mode == 'com': error_str = 'open com error.'
-            else: error_str = 'creat socket error.'
+            error_str = 'creat socket error.'
             self.recv_error_end(error_str)
             ##print 'creat socket error'
             return
 
-        if self.mode != 'com':
-            self.ip_str = self.parent.main_module.getHostByName_request(self.host_str)
-            timeout = 0
-            while self.socekt is not None and not self.ip_str and timeout < 10:
-                time.sleep(0.01)
-                timeout += 0.01
-                self.ip_str = self.parent.main_module.getHostByName_result(self.host_str)
-            if self.socekt is None:
-                return
-            if self.ip_str:
-                if self.ip_str != self.host_str:
-                    temp_str = 'dns %s -> %s.' % (self.host_str, self.ip_str)
-                    self.signal_msg.emit('newLineText', (self.parent, temp_str))
-            else:
-                self.recv_error_end('dns %s timeout.' % self.host_str)
-                return
+        self.ip_str = self.parent.main_module.getHostByName_request(self.host_str)
+        timeout = 0
+        while self.socekt is not None and not self.ip_str and timeout < 10:
+            time.sleep(0.01)
+            timeout += 0.01
+            self.ip_str = self.parent.main_module.getHostByName_result(self.host_str)
+        if self.socekt is None:
+            return
+        if self.ip_str:
+            if self.ip_str != self.host_str:
+                temp_str = 'dns %s -> %s.' % (self.host_str, self.ip_str)
+                self.signal_msg.emit('newLineText', (self.parent, temp_str))
+        else:
+            self.recv_error_end('dns %s timeout.' % self.host_str)
+            return
 
-        if self.mode != 'com':
-        ##if self.mode != 'com' and self.mode != 'ssl client':
-            while self.socekt is not None:
-                ret = client_connect(self.socekt, (self.ip_str, int(self.port_str)))
-                if ret == 1:
-                    print 'connect ok'
-                    self.status = 'Connect'
-                    self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
-                    break
-                elif ret == -1:
-                    print 'connect error'
-                    self.recv_error_end('connect failure.')
-                    return
-                elif ret == 0:
-                    time.sleep(0.01)
-            if self.socekt is not None and self.mode != 'ssl client':
-                self.socekt = SocketSerial(self.socekt)
+        while self.socekt is not None:
+            ret = client_connect(self.socekt, (self.ip_str, int(self.port_str)))
+            if ret == 1:
+                print 'connect ok'
+                self.status = 'Connect'
+                self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
+                break
+            elif ret == -1:
+                print 'connect error'
+                self.recv_error_end('connect failure.')
+                return
+            elif ret == 0:
+                time.sleep(0.01)
+
+        if self.socekt is None:
+            self.recv_error_end('')
+            return
 
         if self.mode == 'ssl client':
             self.socekt.setblocking(True)
@@ -580,6 +553,8 @@ class clientPortDataChannel(DataChannel):
             ##cert = conn.getpeercert()
             ##pprint.pprint(cert)
             self.socekt = SocketSerial(conn)
+        else:
+            self.socekt = SocketSerial(self.socekt)
 
         while self.socekt is not None:
             try:
@@ -594,6 +569,92 @@ class clientPortDataChannel(DataChannel):
             self.signal_msg.emit('appendText', (self.parent, (data, datetime.datetime.now())))
             ##self.recv_counts += len(data)
             ##self.signal_msg.emit('statusChange', self)
+
+        self.recv_error_end('')
+        ##print 'recv_thread exit'
+
+
+class comPortDataChannel(DataChannel):
+    def __init__(self, parent_dataBrowser=None):
+        super(comPortDataChannel, self).__init__(parent_dataBrowser)
+
+    def start_link(self):
+        if self.socekt is not None: return
+        if self.status != 'Idle': return
+        self.status = 'Connecting'
+        threading.Thread(target=self.recv_thread, name='recv_thread').start()
+        super(comPortDataChannel, self).start_link()
+
+    def stop_link(self):
+        print 'clientPortDataChannel stop_link'
+        super(comPortDataChannel, self).stop_link()
+        if self.socekt is None: return
+        try: self.socekt.close()
+        except: pass
+        self.socekt = None
+
+    def recv_error_end(self, error_str):
+        if self.socekt is not None:
+            try: self.socekt.close()
+            except: pass
+        self.socekt = None
+        self.status = 'Idle'
+        if error_str: self.signal_msg.emit('newLineText', (self.parent, error_str))
+        else: self.signal_msg.emit('statusChange', self.parent)
+
+    def recv_thread(self):
+        try:
+            print self.ip_str, self.port_str
+            ip_str_split = self.ip_str.split(':')
+            port_set = ip_str_split[0]
+            UART_set = self.port_str
+            baudrate_set = 115200
+            if len(ip_str_split) > 1:
+                try: baudrate_set = int(ip_str_split[1])
+                except: pass
+            bytesize_set = uart_bytesize_set.get(UART_set[0], serial.EIGHTBITS)
+            stopbits_set = uart_stopbits_set.get(UART_set[1], serial.STOPBITS_ONE)
+            parity_set = uart_parity_set.get(UART_set[2], serial.PARITY_NONE)
+            self.socekt = serial.Serial(
+                port=port_set,
+                baudrate=baudrate_set,
+                bytesize=bytesize_set,
+                parity=parity_set,
+                stopbits=stopbits_set,
+                timeout=0.01,
+                writeTimeout=0.1)
+            print 'connect ok'
+            self.status = 'Connect'
+            self.signal_msg.emit('newLineText', (self.parent, 'Open com success.'))
+            ##self.signal_msg.emit('statusChange', self.parent)
+        except:
+            error_str = 'Open com error.'
+            self.recv_error_end(error_str)
+            ##print 'creat socket error'
+            return
+
+        time_stamp = 0
+        data = ''
+        while self.socekt is not None:
+            try:
+                temp_data = self.socekt.read(2048)
+                if temp_data:
+                    data += temp_data
+                    if time_stamp == 0:
+                        time_stamp = datetime.datetime.now()
+                elif data:
+                    self.signal_msg.emit('appendText', (self.parent, (data, time_stamp)))
+                    time_stamp = 0
+                    data = ''
+            except Exception as e:
+                if data:
+                    self.signal_msg.emit('appendText', (self.parent, (data, time_stamp)))
+                print 'socekt.read Exception', repr(e)
+                if self.socekt is not None:
+                    print 'peer disconnect'
+                    self.signal_msg.emit('newLineText', (self.parent, 'peer disconnect.'))
+                break
+            ##self.signal_msg.emit('appendText', (self.parent, (data, datetime.datetime.now())))
 
         self.recv_error_end('')
         ##print 'recv_thread exit'
@@ -900,8 +961,10 @@ class dataBrowser(QtGui.QPlainTextEdit):
         self.head_str = self.genarate_head_str()
         self.set_display_Wrap_mode()
 
-        if self.mode == 'tcp client' or self.mode == 'udp client' or self.mode == 'com' or self.mode == 'ssl client':
+        if self.mode == 'tcp client' or self.mode == 'udp client' or self.mode == 'ssl client':
             self.dataChannel = clientPortDataChannel(self)
+        elif self.mode == 'com':
+            self.dataChannel = comPortDataChannel(self)
         elif self.mode == 'tcp accept client':
             self.dataChannel = tcpAcceptedDataChannel(self, remote_socket, remote_address, listen_DataBrowser)
         elif self.mode == 'tcp listen':
@@ -998,7 +1061,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
                 head_str = k
                 break
         head_str += ':' + self.host_str
-        if self.mode == 'com' and self.port_str.count(':') == 0:
+        if self.mode == 'com' and self.host_str.count(':') == 0:
             head_str += ':115200'
         head_str += ':' + self.port_str
         if self.mode == 'tcp listen' or self.mode == 'udp listen':
@@ -1134,7 +1197,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
 
     def start_log(self):
         if self.mode == 'help': return
-        log_name = 'log_' + self.ip_str + '_' + self.port_str + '_' \
+        log_name = 'log_' + self.host_str + '_' + self.port_str + '_' \
                    + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + '.log'
         try:
             self.log_handler = open(log_name, 'wb')

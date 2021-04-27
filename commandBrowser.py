@@ -23,7 +23,7 @@ class commandBrowser(QtGui.QPlainTextEdit):
         elif '/' in file_path: self.file_name = file_path.split('/')[-1]
         else: self.file_name = file_path
         ##self.file_name = file_name
-        self.edit_mode = False
+        ##self.edit_mode = False
         ##self.setReadOnly(True)
         self.setLineWrapMode(QtGui.QPlainTextEdit.NoWrap)
         self.save_shortcut = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+S'), self)
@@ -176,17 +176,18 @@ class commandBrowser(QtGui.QPlainTextEdit):
             pass
 
     def mouseDoubleClickEvent(self, event):
-        if not self.edit_mode:
+        ##if not self.edit_mode:
+        if not self.text_changed:
             self.doubleClick_line()
             event.ignore()
         else:
             super(commandBrowser, self).mouseDoubleClickEvent(event)
 
-    def set_edit_mode(self, mode):
-        self.edit_mode = mode
-        if mode:
-            ##self.setReadOnly(False)
-            pass
-        else:
-            ##self.setReadOnly(True)
-            self.save_shortcut_activated()
+    ##def set_edit_mode(self, mode):
+    ##    self.edit_mode = mode
+    ##    if mode:
+    ##        ##self.setReadOnly(False)
+    ##        pass
+    ##    else:
+    ##        ##self.setReadOnly(True)
+    ##        self.save_shortcut_activated()
