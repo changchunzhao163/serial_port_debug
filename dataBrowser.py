@@ -209,6 +209,8 @@ class DataChannel(object):
         self.send_file_name = ''
         self.send_file_count = 0
         self.send_file_interval = 0.01
+        self.match_respond_data = dict()
+        self.in_respond_data = dict()
 
     def start_link(self):
         if not self.send_thread_running:
@@ -256,6 +258,38 @@ class DataChannel(object):
             self.send_file_handler = None
             self.send_file_count = 0
         return data
+
+    def bytes_string_data(self, data):
+        bytes_data = data
+        ##print 'paser_mix_data', bytes_data##
+        return_data = ''
+        while True:
+            start_index = bytes_data.find('[')
+            if start_index == -1: break
+            end_index = bytes_data.find(']')
+            if end_index == -1: break
+            return_data += bytes_data[0:start_index].encode(self.parent.dataChannelcode, 'ignore')
+            hex_str = bytes_data[start_index + 1:end_index]
+            ##print 'hex_str', hex_str
+            if len(bytes_data) > (end_index + 1):
+                bytes_data = bytes_data[end_index + 1:]
+            else:
+                bytes_data = ''
+            if not hex_str: continue
+            hex_str_split = hex_str.split(' ')
+            ##print hex_str_split
+            for h in hex_str_split:
+                if h.upper() == 'CRC16':
+                    return_data += binascii.a2b_hex(crc16_c(return_data))
+                    continue
+                if len(h) == 1: h = '0' + h
+                if (len(h) % 2) != 0:
+                    print 'format error'
+                    self.signal_msg.emit('statusBarFlashText', u'输入格式错误')
+                    return ''
+                return_data += binascii.a2b_hex(h)
+        return_data += bytes_data.encode(self.parent.dataChannelcode, 'ignore')
+        return return_data
 
     def paser_mix_data(self, data):
         data = data.decode(self.parent.dataChannelcode, 'ignore')
@@ -314,39 +348,102 @@ class DataChannel(object):
                 if len(file_name) > 0:
                     self.send_queue_cache.appendleft(('SENDFILE', file_name))
                 return ''
+            elif 'MR' == mix_command:
+                if len(data_split[1]) == 0:
+                    self.match_respond_data = dict()
+                elif len(data_split) >= 2 and (len(data_split[1]) != 1 or data_split[1] != '?'):
+                    bytes_data = self.bytes_string_data(data_split[1])
+                    if len(data_split) == 2 or len(data_split[2]) == 0:
+                        if bytes_data in self.match_respond_data:
+                            del self.match_respond_data[bytes_data]
+                    else:
+                        self.match_respond_data[bytes_data] = data_split
+                if self.match_respond_data:
+                    out_string = ''
+                    for v in self.match_respond_data.values():
+                        if out_string: out_string += '\n'
+                        out_string += ':'.join(v)
+                    self.signal_msg.emit('newLineText', (self.parent, out_string))
+                else:
+                    self.signal_msg.emit('newLineText', (self.parent, 'MR:clear'))
+                return ''
+            elif 'IR' == mix_command:
+                if len(data_split[1]) == 0:
+                    self.in_respond_data = dict()
+                elif len(data_split) >= 2 and (len(data_split[1]) != 1 or data_split[1] != '?'):
+                    kl = []
+                    for i in range(1, len(data_split) - 1):
+                        bytes_data = self.bytes_string_data(data_split[i])
+                        if bytes_data: kl.append(bytes_data)
+                    k = tuple(kl)
+                    if len(data_split) == 2 or len(data_split[-1]) == 0:
+                        if k in self.in_respond_data:
+                            del self.in_respond_data[k]
+                    else:
+                        self.in_respond_data[k] = data_split
+                if self.in_respond_data:
+                    out_string = ''
+                    for v in self.in_respond_data.values():
+                        if out_string: out_string += '\n'
+                        out_string += ':'.join(v)
+                    self.signal_msg.emit('newLineText', (self.parent, out_string))
+                else:
+                    self.signal_msg.emit('newLineText', (self.parent, 'IR:clear'))
+                return ''
             elif 'M' == mix_command:
                 data = data[2:]
+
         ##bytes_data = bytes(data)
-        bytes_data = data
-        ##print 'paser_mix_data', bytes_data##
-        return_data = ''
-        while True:
-            start_index = bytes_data.find('[')
-            if start_index == -1: break
-            end_index = bytes_data.find(']')
-            if end_index == -1: break
-            return_data += bytes_data[0:start_index].encode(self.parent.dataChannelcode, 'ignore')
-            hex_str = bytes_data[start_index + 1:end_index]
-            ##print 'hex_str', hex_str
-            if len(bytes_data) > (end_index + 1):
-                bytes_data = bytes_data[end_index + 1:]
-            else:
-                bytes_data = ''
-            if not hex_str: continue
-            hex_str_split = hex_str.split(' ')
-            ##print hex_str_split
-            for h in hex_str_split:
-                if h.upper() == 'CRC16':
-                    return_data += binascii.a2b_hex(crc16_c(return_data))
-                    continue
-                if len(h) == 1: h = '0' + h
-                if (len(h) % 2) != 0:
-                    print 'format error'
-                    self.signal_msg.emit('statusBarFlashText', u'输入格式错误')
-                    return ''
-                return_data += binascii.a2b_hex(h)
-        return_data += bytes_data.encode(self.parent.dataChannelcode, 'ignore')
-        return return_data
+        ##bytes_data = data
+        ####print 'paser_mix_data', bytes_data##
+        ##return_data = ''
+        ##while True:
+        ##    start_index = bytes_data.find('[')
+        ##    if start_index == -1: break
+        ##    end_index = bytes_data.find(']')
+        ##    if end_index == -1: break
+        ##    return_data += bytes_data[0:start_index].encode(self.parent.dataChannelcode, 'ignore')
+        ##    hex_str = bytes_data[start_index + 1:end_index]
+        ##    ##print 'hex_str', hex_str
+        ##    if len(bytes_data) > (end_index + 1):
+        ##        bytes_data = bytes_data[end_index + 1:]
+        ##    else:
+        ##        bytes_data = ''
+        ##    if not hex_str: continue
+        ##    hex_str_split = hex_str.split(' ')
+        ##    ##print hex_str_split
+        ##    for h in hex_str_split:
+        ##        if h.upper() == 'CRC16':
+        ##            return_data += binascii.a2b_hex(crc16_c(return_data))
+        ##            continue
+        ##        if len(h) == 1: h = '0' + h
+        ##        if (len(h) % 2) != 0:
+        ##            print 'format error'
+        ##            self.signal_msg.emit('statusBarFlashText', u'输入格式错误')
+        ##            return ''
+        ##        return_data += binascii.a2b_hex(h)
+        ##return_data += bytes_data.encode(self.parent.dataChannelcode, 'ignore')
+        ##return return_data
+        return self.bytes_string_data(data)
+
+    def recv_data_handler(self, data):
+        data = bytes(data)
+        ##if len(self.auto_respond_data) > 0: print data, len(data)
+        if self.match_respond_data.has_key(data):
+            print 'find match keywords'
+            self.send_data('sendMixData', self.match_respond_data[data][2])
+            return
+        if self.in_respond_data:
+            for k in self.in_respond_data.keys():
+                in_keywords_find = 1
+                for i in k:
+                    if i not in data:
+                        in_keywords_find = 0
+                        break
+                if in_keywords_find:
+                    print 'find in keywords'
+                    self.send_data('sendMixData', self.in_respond_data[k][-1])
+                    return
 
     def send_data(self, data_type, data):
         if self.socekt is None: return False
@@ -621,7 +718,7 @@ class comPortDataChannel(DataChannel):
                 bytesize=bytesize_set,
                 parity=parity_set,
                 stopbits=stopbits_set,
-                timeout=0.01,
+                timeout=0.02,
                 writeTimeout=0.1)
             print 'connect ok'
             self.status = 'Connect'
@@ -634,18 +731,24 @@ class comPortDataChannel(DataChannel):
             return
 
         time_stamp = 0
+        time_out_count = 1
         data = ''
         while self.socekt is not None:
             try:
                 temp_data = self.socekt.read(2048)
                 if temp_data:
                     data += temp_data
+                    time_out_count = 1
+                    if data[-1:] != '\n' and 'C' in self.parent.display_mode and 'T' in self.parent.display_mode:
+                        time_out_count = 5
                     if time_stamp == 0:
                         time_stamp = datetime.datetime.now()
                 elif data:
-                    self.signal_msg.emit('appendText', (self.parent, (data, time_stamp)))
-                    time_stamp = 0
-                    data = ''
+                    time_out_count -= 1
+                    if time_out_count <= 0:
+                        self.signal_msg.emit('appendText', (self.parent, (data, time_stamp)))
+                        time_stamp = 0
+                        data = ''
             except Exception as e:
                 if data:
                     self.signal_msg.emit('appendText', (self.parent, (data, time_stamp)))
@@ -1153,6 +1256,7 @@ class dataBrowser(QtGui.QPlainTextEdit):
         self.moveCursor(QtGui.QTextCursor.End)
         if msq_type == 'appendText':
             self.recv_counts += len(data)
+            self.dataChannel.recv_data_handler(data)
         if self.log_handler:
             try:
                 self.log_handler.write(disp_str)
