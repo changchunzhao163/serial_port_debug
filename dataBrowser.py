@@ -1259,9 +1259,10 @@ class dataBrowser(QtGui.QPlainTextEdit):
             self.dataChannel.recv_data_handler(data)
         if self.log_handler:
             try:
-                self.log_handler.write(disp_str)
+                self.log_handler.write(disp_str.encode(self.dataChannelcode, 'ignore'))
                 self.log_handler.flush()
-            except:
+            except Exception as e:
+                print 'log error:', e
                 self.log_handler = None
         self.signal_msg.emit('statusChange', self)
 
