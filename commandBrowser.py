@@ -3,7 +3,7 @@
 from PyQt4 import QtCore, QtGui
 import dataBrowser
 
-data_command_head = ['M', 'S', 'LOOP', 'SF', 'MR', 'IR']
+data_command_head = ['M', 'S', 'LOOP', 'SF', 'MR', 'IR', 'SUB', 'USUB', 'PUB']
 
 def get_command_from_data(data):
     data_split = data.split(':')

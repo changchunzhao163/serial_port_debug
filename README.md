@@ -10,6 +10,8 @@ https://github.com/changchunzhao163/serial_port_debug
     udp client连接
     tcp listen
     udp listen
+    mqtt client连接
+    mqtt ssl client连接
     接收数据显示可以字符串模式，HEX模式，时间标签模式，回显模式，log模式，单独或组合显示
     可以发送字符串或HEX或组合数据
     接收数据显示页多tab显示
@@ -60,6 +62,20 @@ https://github.com/changchunzhao163/serial_port_debug
     如果数据1和数据2都没有则清空自动响应规则
     如果数据1为?号，则查询当前IR规则
 
+    SUB:订阅主题
+    只对mqtt连接有效
+    如果订阅主题为?号，则查询所有的当前订阅主题
+
+    USUB:退订主题
+    只对mqtt连接有效
+    如果退订主题为?号，则查询所有的当前订阅主题
+    如果是USUB::，则清空所有订阅主题
+
+    PUB:发布主题
+    只对mqtt连接有效
+    如果发布主题为?号，则查询当前发布主题
+    发布主题只能有一个，发送给服务器的数据都是以当前发布主题上传的
+
 
 #### 预设指令页发送控制指令说明：
 []内为可以选部分
@@ -100,6 +116,14 @@ https://github.com/changchunzhao163/serial_port_debug
     udp listen监听模式
     如果设置S，为单窗口模式，所有接受的socket连接接收发的数据在同一个窗口显示
     如果为单窗口模式，发送的数据会向所有已接受的socket发送
+
+    MQ:IP或域名:端口:[接收数据显示模式]:[client id]:[user name]:[password]
+    mqtt client连接
+    注意:分隔符:号不可缺少
+
+    MQS:IP或域名:端口:[接收数据显示模式]:[client id]:[user name]:[password]
+    mqtt ssl client连接，不认证证书
+    注意:分隔符:号不可缺少
 
     CODE:编码方式
     设置数据通道的编码方式，默认GBK

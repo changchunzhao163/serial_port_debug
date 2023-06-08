@@ -286,15 +286,11 @@ class Ui_MainWindow(object):
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow", None))
 
-    def counterReset_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
-        if msg_data: pass
+    def counterReset_message_handler(self, _msg_type, _msg_data):
         tabWidget = self.dataBrowserTab.currentWidget()
         if tabWidget: tabWidget.counter_reset()
 
-    def displayClear_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
-        if msg_data: pass
+    def displayClear_message_handler(self, _msg_type, _msg_data):
         tabWidget = self.dataBrowserTab.currentWidget()
         if tabWidget: tabWidget.display_clear()
 
@@ -306,16 +302,13 @@ class Ui_MainWindow(object):
         tabWidget, tabWidget_msg = msg_data
         tabWidget.msg_handler(msg_type, tabWidget_msg)
 
-    def closeEvent_message_handler(self, msg_type, msg_data):
+    def closeEvent_message_handler(self, _msg_type, _msg_data):
         ##print 'closeEvent_message_handler'
-        if msg_type: pass
-        if msg_data: pass
         for i in range(self.dataBrowserTab.count()):
             tabWidget = self.dataBrowserTab.widget(i)
             tabWidget.stop_link()
 
-    def status_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
+    def status_message_handler(self, _msg_type, msg_data):
         tabWidget = msg_data
         if tabWidget is self.dataBrowserTab.currentWidget():
             self.reflash_status_indecate()
@@ -323,12 +316,10 @@ class Ui_MainWindow(object):
             i = self.dataBrowserTab.indexOf(tabWidget)
             self.dataBrowserTab.setTabText(i, '*' + tabWidget.head_str)
 
-    def statusBarFlashText_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
+    def statusBarFlashText_message_handler(self, _msg_type, msg_data):
         self.statusBar.showMessage(msg_data, 2000)
 
-    def newCommandTab_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
+    def newCommandTab_message_handler(self, _msg_type, msg_data):
         for i in range(self.commandBrowserTab.count()):
             tabWidget = self.commandBrowserTab.widget(i)
             if tabWidget.file_path == msg_data:
@@ -338,8 +329,7 @@ class Ui_MainWindow(object):
         self.commandBrowserTab.addTab(command_Browser, command_Browser.file_name)
         self.commandBrowserTab.setCurrentWidget(command_Browser)
 
-    def newDataBrowserTab_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
+    def newDataBrowserTab_message_handler(self, _msg_type, msg_data):
         for i in range(self.dataBrowserTab.count()):
             tabWidget = self.dataBrowserTab.widget(i)
             if tabWidget.compare_linkStr(msg_data):
@@ -352,8 +342,7 @@ class Ui_MainWindow(object):
         ##self.reflash_status_indecate()
         data_Browser.start_link()
 
-    def remoteDataBrowserTab_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
+    def remoteDataBrowserTab_message_handler(self, _msg_type, msg_data):
         data_Browser = msg_data
         self.dataBrowserTab.addTab(data_Browser, data_Browser.head_str)
 
@@ -367,15 +356,13 @@ class Ui_MainWindow(object):
         self.dataBrowserTab.addTab(data_Browser, data_Browser.head_str)
         data_Browser.start_link()
 
-    def setCode_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
+    def setCode_message_handler(self, _msg_type, msg_data):
         tabWidget = self.dataBrowserTab.currentWidget()
         if tabWidget:
             tabWidget.dataChannelcode = msg_data
             self.statusBar_code.setText(tabWidget.dataChannelcode.upper())
 
-    def WindowStateChange_message_handler(self, msg_type, msg_data):
-        if msg_type: pass
+    def WindowStateChange_message_handler(self, _msg_type, msg_data):
         if self.windowState != msg_data:
             if msg_data == 'WindowMaximized':
                 print 'WindowMaximized'
@@ -424,9 +411,11 @@ class Ui_MainWindow(object):
         if tabWidget.dataChannel:
             if self.data_sending and not tabWidget.dataChannel.data_sending:
                 self.pushbutton_send.setText(u'发送')
+                self.data_sending = False
             elif tabWidget.dataChannel.data_sending and not self.data_sending:
                 self.pushbutton_send.setText(u'停止发送')
-            self.data_sending = tabWidget.dataChannel.data_sending
+                self.data_sending = True
+            ##self.data_sending = tabWidget.dataChannel.data_sending
 
         if self.get_toolbar_display_mode() != tabWidget.display_mode:
             self.set_toolbar_display_mode(tabWidget.display_mode)

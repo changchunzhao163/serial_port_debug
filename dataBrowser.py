@@ -12,6 +12,8 @@ import serial
 import select
 import ssl
 import pprint
+import paho.mqtt.client as mqtt
+import uuid
 
 dt_boot =  datetime.datetime.now()
 
@@ -89,6 +91,8 @@ mode_str_to_mode = {
     'UL': 'udp listen',
     'C': 'com',
     'HELP': 'help',
+    'MQ': 'mqtt client',
+    'MQS': 'mqtt ssl client',
 }
 
 uart_bytesize_set = {
@@ -392,38 +396,41 @@ class DataChannel(object):
                 return ''
             elif 'M' == mix_command:
                 data = data[2:]
+            elif 'PUB' == mix_command:
+                if self.mode != 'mqtt client' and self.mode != 'mqtt ssl client': return ''
+                if data_split[1] and data_split[1] != '?':
+                    self.mqtt_set_publish_topic(data_split[1])
+                if self.pub_topic:
+                    out_string = 'PUB:' + self.pub_topic
+                    self.signal_msg.emit('newLineText', (self.parent, out_string))
+                return ''
+            elif 'SUB' == mix_command:
+                if self.mode != 'mqtt client' and self.mode != 'mqtt ssl client': return ''
+                if data_split[1] and data_split[1] != '?':
+                    self.mqtt_set_subscribe_topic(data_split[1])
+                if self.sub_topic:
+                    out_string = ''
+                    for i in self.sub_topic:
+                        if out_string: out_string += '\n'
+                        out_string += 'SUB:' + i
+                    self.signal_msg.emit('newLineText', (self.parent, out_string))
+                else:
+                    self.signal_msg.emit('newLineText', (self.parent, 'SUB:clear'))
+                return ''
+            elif 'USUB' == mix_command:
+                if self.mode != 'mqtt client' and self.mode != 'mqtt ssl client': return ''
+                if data_split[1] != '?':
+                    self.mqtt_del_subscribe_topic(data_split[1])
+                if self.sub_topic:
+                    out_string = ''
+                    for i in self.sub_topic:
+                        if out_string: out_string += '\n'
+                        out_string += 'SUB:' + i
+                    self.signal_msg.emit('newLineText', (self.parent, out_string))
+                else:
+                    self.signal_msg.emit('newLineText', (self.parent, 'SUB:clear'))
+                return ''
 
-        ##bytes_data = bytes(data)
-        ##bytes_data = data
-        ####print 'paser_mix_data', bytes_data##
-        ##return_data = ''
-        ##while True:
-        ##    start_index = bytes_data.find('[')
-        ##    if start_index == -1: break
-        ##    end_index = bytes_data.find(']')
-        ##    if end_index == -1: break
-        ##    return_data += bytes_data[0:start_index].encode(self.parent.dataChannelcode, 'ignore')
-        ##    hex_str = bytes_data[start_index + 1:end_index]
-        ##    ##print 'hex_str', hex_str
-        ##    if len(bytes_data) > (end_index + 1):
-        ##        bytes_data = bytes_data[end_index + 1:]
-        ##    else:
-        ##        bytes_data = ''
-        ##    if not hex_str: continue
-        ##    hex_str_split = hex_str.split(' ')
-        ##    ##print hex_str_split
-        ##    for h in hex_str_split:
-        ##        if h.upper() == 'CRC16':
-        ##            return_data += binascii.a2b_hex(crc16_c(return_data))
-        ##            continue
-        ##        if len(h) == 1: h = '0' + h
-        ##        if (len(h) % 2) != 0:
-        ##            print 'format error'
-        ##            self.signal_msg.emit('statusBarFlashText', u'输入格式错误')
-        ##            return ''
-        ##        return_data += binascii.a2b_hex(h)
-        ##return_data += bytes_data.encode(self.parent.dataChannelcode, 'ignore')
-        ##return return_data
         return self.bytes_string_data(data)
 
     def recv_data_handler(self, data):
@@ -476,12 +483,13 @@ class DataChannel(object):
             elif self.send_file_handler is not None:
                 sleep_timeout = self.send_file_interval
             else:
-                sleep_timeout = None
+                sleep_timeout = 0
                 if self.data_sending \
                         and self.send_thread_queue.empty() \
                         and len(self.send_queue_cache) == 0\
                         and not self.loop_start_flag \
                         and len(self.send_loop_queue_cache) == 0:
+                    sleep_timeout = None
                     self.data_sending = False
                     self.signal_msg.emit('statusChange', self.parent)
             try:
@@ -1041,6 +1049,155 @@ class udpListenDataChannel(DataChannel):
                     pass
 
 
+class MQTTClientDataChannel(DataChannel):
+    def __init__(self, parent_dataBrowser=None):
+        super(MQTTClientDataChannel, self).__init__(parent_dataBrowser)
+        self.mqtt_client = None
+        self.mqtt_deque = collections.deque()
+        self.sub_topic = []
+        self.pub_topic = ''
+        self.last_topic = ''
+
+    def mqtt_on_connect(self, _client, _userdata, _flags, rc):
+        if rc != 0:
+            self.recv_error_end('username or password error')
+            return
+        self.status = 'Connect'
+        self.signal_msg.emit('newLineText', (self.parent, 'connect success.'))
+        for i in self.sub_topic:
+            try: self.mqtt_client.subscribe(i)
+            except: pass
+
+    def mqtt_on_message(self, _client, _userdata, msg):
+        if self.last_topic != msg.topic:
+            self.signal_msg.emit('newLineText', (self.parent, 'TOPIC: ' + msg.topic))
+            self.last_topic = msg.topic
+        self.signal_msg.emit('appendText', (self.parent, (msg.payload, datetime.datetime.now())))
+
+    def mqtt_on_disconnect(self, _client, _userdata, _rc):
+        self.recv_error_end('disconnect')
+
+    def mqtt_on_subscribe(self, _client, _userdata, _mid, _reasoncodes=None, _properties=None):
+        pass
+
+    def mqtt_set_publish_topic(self, topic):
+        self.pub_topic = topic
+
+    def mqtt_set_subscribe_topic(self, topic):
+        if topic not in self.sub_topic:
+            self.sub_topic.append(topic)
+            self.mqtt_deque.appendleft(('subscribe', topic))
+
+    def mqtt_del_subscribe_topic(self, topic):
+        if not topic:
+            for i in self.sub_topic:
+                self.mqtt_deque.appendleft(('unsubscribe', i))
+            self.sub_topic = []
+        elif topic in self.sub_topic:
+            self.sub_topic.remove(topic)
+            self.mqtt_deque.appendleft(('unsubscribe', topic))
+
+    def start_link(self):
+        if self.mqtt_client is not None: return
+        self.mqtt_deque.clear()
+        self.status = 'Connecting'
+        self.last_topic = ''
+        threading.Thread(target=self.recv_thread, name='recv_thread').start()
+        super(MQTTClientDataChannel, self).start_link()
+
+    def stop_link(self):
+        print 'MQTTClientDataChannel stop_link'
+        super(MQTTClientDataChannel, self).stop_link()
+        if self.mqtt_client is not None:
+            self.mqtt_deque.appendleft(('close', ''))
+            while self.mqtt_client is not None: time.sleep(0.001)
+        self.status = 'Idle'
+
+    def recv_error_end(self, error_str):
+        if self.mqtt_client is None: return
+        try: self.mqtt_client.close()
+        except: pass
+        self.mqtt_client = None
+        self.socekt = None
+        self.status = 'Idle'
+        if error_str: self.signal_msg.emit('newLineText', (self.parent, error_str))
+        else: self.signal_msg.emit('statusChange', self.parent)
+
+    def send_data_to_channel(self, data):
+        if self.pub_topic:
+            self.mqtt_deque.appendleft(('publish', (self.pub_topic, data)))
+        return True
+
+    def recv_thread(self):
+        linkStr = self.parent.linkStr
+        linkStr_split = linkStr.split(':')
+        client_id = ''
+        user = ''
+        password = ''
+        if len(linkStr_split) >= 5: client_id = linkStr_split[4]
+        if len(linkStr_split) >= 6: user = linkStr_split[5]
+        if len(linkStr_split) >= 7: password = linkStr_split[6]
+        if not client_id: client_id = str(uuid.uuid4())
+        self.mqtt_client = mqtt.Client(client_id, protocol=mqtt.MQTTv311)
+        self.mqtt_client.on_connect = self.mqtt_on_connect
+        self.mqtt_client.on_message = self.mqtt_on_message
+        self.mqtt_client.on_disconnect = self.mqtt_on_disconnect
+        self.mqtt_client.on_subscribe = self.mqtt_on_subscribe
+        ##self.mqtt_client.on_log = self.mqtt_on_log
+        self.mqtt_client.username_pw_set(user, password)
+        if self.mode == 'mqtt ssl client':
+            print 'mqtt ssl client'
+            self.mqtt_client.tls_set(cert_reqs = ssl.CERT_NONE)
+            self.mqtt_client.tls_insecure_set(True)
+        low_connect = True
+        while self.mqtt_client is not None:
+            if low_connect:
+                try:
+                    self.mqtt_client.connect(self.host_str, int(self.port_str), 10)
+                    low_connect = False
+                    self.socekt = self.mqtt_client.socket()
+                except:
+                    self.recv_error_end('connect failure.')
+                    break
+
+            while len(self.mqtt_deque) > 0 and self.mqtt_client is not None:
+                msgType, msgData = self.mqtt_deque.pop()
+                if msgType == 'close':
+                    self.recv_error_end(msgData)
+                elif msgType == 'publish':
+                    topic, msg = msgData
+                    if self.mqtt_client is not None and self.mqtt_client.is_connected():
+                        try: self.mqtt_client.publish(topic, msg)
+                        except: pass
+                elif msgType == 'subscribe':
+                    if self.mqtt_client is not None and self.mqtt_client.is_connected():
+                        try: self.mqtt_client.subscribe(msgData)
+                        except: pass
+                elif msgType == 'unsubscribe':
+                    if self.mqtt_client is not None and self.mqtt_client.is_connected():
+                        try: self.mqtt_client.unsubscribe(msgData)
+                        except: pass
+
+            if self.mqtt_client is None: break
+
+            s = self.mqtt_client.socket()
+            select_read_list = [s]
+            select_write_list = []
+            if self.mqtt_client.want_write():
+                select_write_list.append(s)
+            r, w, e = select.select(select_read_list, select_write_list, [], 0.1)
+            if self.mqtt_client and r:
+                try: self.mqtt_client.loop_read()
+                except: pass
+            if self.mqtt_client and w:
+                try: self.mqtt_client.loop_write()
+                except: pass
+            if self.mqtt_client:
+                try: self.mqtt_client.loop_misc()
+                except: pass
+        print 'mqtt recv_thread end'
+
+
 class dataBrowser(QtGui.QPlainTextEdit):
     def __init__(self, parent=None, MainWindow=None, main_module=None, linkStr=None,
                  remote_socket=None, remote_address=None, listen_DataBrowser=None):
@@ -1076,6 +1233,8 @@ class dataBrowser(QtGui.QPlainTextEdit):
             self.dataChannel = udpAcceptedDataChannel(self, remote_socket, remote_address, listen_DataBrowser)
         elif self.mode == 'udp listen':
             self.dataChannel = udpListenDataChannel(self)
+        elif self.mode == 'mqtt client' or self.mode == 'mqtt ssl client':
+            self.dataChannel = MQTTClientDataChannel(self)
         elif self.mode == 'help':
             try:
                 with open('README.md', 'r') as fd:
