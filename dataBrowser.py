@@ -473,6 +473,7 @@ class DataChannel(object):
         sleep_timeout_timestamp = None
         self.send_queue_cache.clear()
         timestamp = time.time()
+        pre_sleep_timeout = None
         while True:
             if sleep_timeout_timestamp:
                 sleep_timeout = sleep_timeout_timestamp - timestamp_from_bootime()
@@ -483,16 +484,24 @@ class DataChannel(object):
             elif self.send_file_handler is not None:
                 sleep_timeout = self.send_file_interval
             else:
-                sleep_timeout = 0
-                if self.data_sending \
-                        and self.send_thread_queue.empty() \
-                        and len(self.send_queue_cache) == 0\
-                        and not self.loop_start_flag \
-                        and len(self.send_loop_queue_cache) == 0:
+                if not self.data_sending:
                     sleep_timeout = None
-                    self.data_sending = False
-                    self.signal_msg.emit('statusChange', self.parent)
+                else:
+                    sleep_timeout = 0
+                    if self.send_thread_queue.empty() \
+                            and len(self.send_queue_cache) == 0\
+                            and not self.loop_start_flag \
+                            and len(self.send_loop_queue_cache) == 0:
+                        sleep_timeout = None
+                        self.data_sending = False
+                        self.signal_msg.emit('statusChange', self.parent)
             try:
+                if pre_sleep_timeout != sleep_timeout:
+                    print self.data_sending, self.send_thread_queue.empty(), \
+                            len(self.send_queue_cache) == 0, not self.loop_start_flag, \
+                            len(self.send_loop_queue_cache) == 0
+                    pre_sleep_timeout = sleep_timeout
+                    print 'sleep_timeout =', sleep_timeout
                 req, req_data = self.send_thread_queue.get(True, sleep_timeout)
                 if req == 'EXIT':
                     print 'send_thread EXIT'
